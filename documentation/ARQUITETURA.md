@@ -89,6 +89,7 @@ flowchart TB
         Theme[ThemeProvider]
         Auth[AuthProvider]
         Settings[SettingsProvider]
+        Knowledge[KnowledgeBaseProvider]
         Chat[ChatProvider]
         Tooltip[TooltipProvider + Toaster]
     end
@@ -126,16 +127,17 @@ src/
 │   ├── shared/               # Reutilizáveis entre páginas (sidebar, header, empty-state, ...)
 │   ├── landing/              # Seções da página inicial
 │   ├── auth/                 # Formulários de login/cadastro/recuperar senha
-│   ├── dashboard/            # Blocos do dashboard
-│   ├── agent/                # Cards de configuração do "Meu Agente"
+│   ├── dashboard/            # Blocos do dashboard (status do agente, saúde da base, etc.)
+│   ├── agent/                # Configuração do "Meu Agente": personalidade, base de conhecimento, canais
 │   ├── chat/                 # Tudo do chat (lista, thread, mensagem, input, ...)
 │   ├── profile/              # Formulário de perfil
 │   └── subscription/         # Card de uso e modal de planos
 │
 ├── contexts/                 # Estado global mockado
-│   ├── auth-context.tsx      # Usuário/sessão
-│   ├── settings-context.tsx  # Configurações do agente (WhatsApp / Uso Pessoal)
-│   └── chat-context.tsx      # Conversas e mensagens
+│   ├── auth-context.tsx           # Usuário/sessão
+│   ├── settings-context.tsx       # Agente: personalidade base, instruções, canais (WhatsApp / Uso Pessoal)
+│   ├── knowledge-base-context.tsx # Base de Conhecimento (upload/processamento mockados)
+│   └── chat-context.tsx           # Conversas e mensagens
 │
 ├── hooks/
 │   ├── use-local-storage.ts  # Hook genérico para ler/escrever no localStorage
@@ -144,11 +146,14 @@ src/
 ├── lib/
 │   ├── constants.ts          # Rotas, chaves de storage, credenciais demo, etc.
 │   ├── utils.ts              # cn() + formatadores de data/iniciais
+│   ├── agent-status.ts       # Deriva "configurações pendentes" + labels de status do agente
 │   └── validators.ts         # Schemas Zod dos formulários
 │
 ├── mocks/                    # DADOS FALSOS (única fonte de mock de dados)
 │   ├── users.ts
-│   ├── agent-settings.ts
+│   ├── agent-settings.ts     # DEMO_SETTINGS / INITIAL_SETTINGS (estrutura v2)
+│   ├── personality.ts        # DEFAULT_PERSONALITY, presets e metadados dos controles
+│   ├── knowledge-base.ts     # MOCK_KNOWLEDGE_FILES + helpers (tipo/tamanho)
 │   ├── conversations.ts      # conversas + mensagens + respostas automáticas
 │   ├── subscription.ts       # assinatura demo + tabela de planos
 │   ├── activity.ts
@@ -200,15 +205,17 @@ Também importa o CSS global: `import "@/styles/globals.css"`.
 internos podem consumir os mais externos.
 
 ```tsx
-<ThemeProvider>          {/* tema claro/escuro */}
-  <AuthProvider>         {/* usuário/sessão */}
-    <SettingsProvider>   {/* config do agente */}
-      <ChatProvider>     {/* conversas */}
-        <TooltipProvider>
-          {children}
-          <Toaster />    {/* container global de toasts (sonner) */}
-        </TooltipProvider>
-      </ChatProvider>
+<ThemeProvider>              {/* tema claro/escuro */}
+  <AuthProvider>             {/* usuário/sessão */}
+    <SettingsProvider>       {/* agente: personalidade, instruções, canais */}
+      <KnowledgeBaseProvider> {/* base de conhecimento (upload mockado) */}
+        <ChatProvider>       {/* conversas */}
+          <TooltipProvider>
+            {children}
+            <Toaster />      {/* container global de toasts (sonner) */}
+          </TooltipProvider>
+        </ChatProvider>
+      </KnowledgeBaseProvider>
     </SettingsProvider>
   </AuthProvider>
 </ThemeProvider>
@@ -262,6 +269,12 @@ element={<Layout/>}>` com rotas-filhas que aparecem no `<Outlet/>` do layout.
   `src/lib/constants.ts` no código (nunca hardcode strings de rota).
 - `chat` e `chat/:conversationId` apontam para a **mesma** `ChatPage`; o parâmetro
   `:conversationId` é lido com `useParams()`.
+- **`meu-agente` usa abas via query param.** A `AgentPage` lê `?tab=` com `useSearchParams()`
+  e renderiza a aba correspondente (`overview` | `personality` | `knowledge` | `instructions`
+  | `channels`). É deep-linkável: o Dashboard navega, por exemplo, para
+  `${ROUTES.agent}?tab=knowledge`. Há constantes de sub-rotas em `ROUTES`
+  (`agentPersonality`, `agentKnowledge`, ...) como referência para uma futura migração a rotas
+  aninhadas.
 - Qualquer rota desconhecida cai em `NotFoundPage`.
 
 ---
@@ -342,17 +355,28 @@ loading dos botões.
 
 ### 8.2 `SettingsContext` (`contexts/settings-context.tsx`)
 
-Guarda as configurações do agente. Persiste em `localStorage` (chave `flowassist_settings`).
-Valor inicial = `DEMO_SETTINGS`.
+Guarda as configurações do agente. Persiste em `localStorage` (chave `flowassist_settings_v2`
+— a versão subiu porque o shape de `AgentSettings` mudou na v2). Valor inicial = `DEMO_SETTINGS`.
 
 API de `useSettings()`:
 
 | Função | O que faz |
 | --- | --- |
-| `settings` | Objeto `AgentSettings` (whatsapp + personalUse) |
+| `settings` | Objeto `AgentSettings` (agent, basePersonality, baseInstructions, knowledgeBase, whatsapp, personalUse) |
 | `toggleWhatsApp(enabled)` | Liga/desliga o WhatsApp |
 | `reconnectWhatsApp()` | Refaz a conexão |
 | `togglePersonalUse(enabled)` | Liga/desliga o uso pessoal (controla o item Chat na sidebar) |
+| `updateAgentProfile(patch)` | Atualiza nome/status/descrição do agente |
+| `updateBasePersonality(patch)` | Atualiza campos da personalidade base |
+| `setBasePersonality(p)` | Substitui a personalidade base (usado por presets) |
+| `updateBaseInstructions(text)` | Atualiza as instruções do assistente |
+| `updateChannelConfig(channelId, patch)` | Atualiza um canal (`enabled`, herança, instruções, ...) |
+| `setChannelPersonality(channelId, p)` | Define a personalidade própria de um canal |
+
+> **Herança por canal:** quando `channel.useSharedPersonality === true`, o canal usa
+> `settings.basePersonality`. Ao desligar, o `ChannelConfigCard` semeia `channel.personality`
+> com uma cópia da base e passa a editar a personalidade própria. O mesmo conceito vale para
+> `useSharedKnowledgeBase`.
 
 **Máquina de estados da conexão WhatsApp** (campo `connectionStatus`):
 
@@ -368,6 +392,36 @@ stateDiagram-v2
 
 Os `setTimeout` que simulam a conexão ficam guardados num `useRef` para referência. (A
 limpeza profunda de timers é um ponto de melhoria, mas inofensivo aqui por serem one-shot.)
+
+### 8.2b `KnowledgeBaseContext` (`contexts/knowledge-base-context.tsx`)
+
+Guarda a lista de arquivos da Base de Conhecimento. **Vive apenas em memória** (semeado com
+`MOCK_KNOWLEDGE_FILES`); reinicia a cada refresh, voltando ao conjunto demonstrativo.
+
+API de `useKnowledgeBase()`:
+
+| Campo/Função | O que faz |
+| --- | --- |
+| `files` | Lista de `KnowledgeFile` |
+| `summary` | Derivado: total, ready, processing, uploading, error, totalSizeBytes |
+| `addFiles(fileList)` | Cria entradas (status `uploading`) e dispara a simulação |
+| `removeFile(id)` | Remove um arquivo |
+| `retryFile(id)` | Reinicia a simulação de um arquivo com erro |
+
+**Máquina de estados de um arquivo** (simulada com `setInterval`/`setTimeout`):
+
+```mermaid
+stateDiagram-v2
+    [*] --> uploading: addFiles()
+    uploading --> processing: progresso de upload chega a 100%
+    processing --> ready: processamento ok (~85%)
+    processing --> error: falha simulada (~15%)
+    error --> uploading: retryFile()
+    ready --> [*]: removeFile()
+```
+
+> **É aqui que entraria o pipeline real de RAG** (ver [seção 17](#17-caminho-para-produção-remover-os-mocks)).
+> Os campos `chunks`, `vectors` e `indexedAt` de `KnowledgeFile` já são placeholders para isso.
 
 ### 8.3 `ChatContext` (`contexts/chat-context.tsx`)
 
@@ -417,6 +471,10 @@ Esta é a seção mais importante para entender o estado do projeto.
 | --- | --- | --- |
 | **Autenticação** | `contexts/auth-context.tsx` + `mocks/users.ts` | Não há servidor; credenciais validadas no cliente; usuário guardado no localStorage |
 | **Conexão WhatsApp** | `contexts/settings-context.tsx` + `mocks/agent-settings.ts` | Número e status "Conectado" são fixos; conexão simulada com `setTimeout` |
+| **Personalidade** | `contexts/settings-context.tsx` + `mocks/personality.ts` | Controles salvos/persistidos, mas sem IA não alteram respostas reais |
+| **Instruções do Assistente** | `contexts/settings-context.tsx` | Texto salvo em `baseInstructions`; não alimenta um prompt real ainda |
+| **Base de Conhecimento (RAG)** | `contexts/knowledge-base-context.tsx` + `mocks/knowledge-base.ts` | Upload e estados (uploading/processing/ready/error) simulados com timers; nenhum arquivo é lido, vetorizado ou indexado |
+| **Configuração por canal** | `contexts/settings-context.tsx` | Herança e instruções por canal salvas; sem IA, ainda não mudam respostas |
 | **Respostas do chat (IA)** | `contexts/chat-context.tsx` + `mocks/conversations.ts` | Respostas pré-escritas, escolhidas aleatoriamente após um delay |
 | **Conversas/mensagens iniciais** | `mocks/conversations.ts` | Histórico fixo; mensagens novas só vivem em memória |
 | **Assinatura/planos** | `pages/SubscriptionPage.tsx` + `mocks/subscription.ts` | Plano, limites e troca de plano são locais (sem cobrança) |
@@ -435,12 +493,26 @@ Esta é a seção mais importante para entender o estado do projeto.
 Contém **todas** as interfaces do domínio. As principais:
 
 - `User` — id, name, email, avatarUrl?, createdAt
-- `AgentSettings` — `whatsapp` (enabled, phoneNumber?, connectionStatus, connectedAt?) e
-  `personalUse` (enabled)
+- `AgentSettings` — `agent` (`AgentProfile`), `basePersonality` (`AgentPersonality`),
+  `baseInstructions` (string), `knowledgeBase` (`KnowledgeBase`), `whatsapp`
+  (`WhatsAppChannelConfig`) e `personalUse` (`PersonalUseChannelConfig`)
+- `AgentProfile` — name, avatarUrl?, status (`AgentStatus`), description?
+- `AgentStatus` — `"draft" | "active" | "paused"`
+- `AgentPersonality` — temperature, creativity, formality, objectivity, technicalLevel (0–100),
+  writingStyle, emojiUsage, responseLength
+- `ChannelId` — `"personalUse" | "whatsapp"`
+- `ChannelConfigBase` — enabled, useSharedPersonality, useSharedKnowledgeBase, personality?,
+  instructions
+- `WhatsAppChannelConfig` (estende `ChannelConfigBase`) — phoneNumber?, connectionStatus,
+  connectedAt?
+- `KnowledgeFile` — id, name, type (`KnowledgeFileType`), sizeBytes, status
+  (`KnowledgeFileStatus`), progress?, errorMessage?, uploadedAt, chunks?/vectors?/indexedAt?
+  (placeholders RAG)
+- `KnowledgeBase` — `{ files: KnowledgeFile[] }`
 - `ConnectionStatus` — `"disconnected" | "connecting" | "connected" | "reconnecting"`
 - `Conversation`, `Message` (com `role: "user" | "assistant"`)
 - `Subscription`, `Plan`, `PlanId`, `UsageLimit`
-- `Activity`, `FaqItem`
+- `Activity` (com `ActivityType` incluindo `"knowledge"` e `"personality"`), `FaqItem`
 
 Sempre que precisar de um novo formato de dado, **declare a interface aqui** e importe com
 `import type { ... } from "@/types"`.
@@ -450,6 +522,10 @@ Cada arquivo exporta dados estáticos e, às vezes, **factories**. Exemplos:
 
 - `users.ts` → `DEMO_USER` e `createMockUser(name, email)` (gera id e avatar via DiceBear).
 - `agent-settings.ts` → `DEMO_SETTINGS`, `INITIAL_SETTINGS`, `MOCK_PHONE_NUMBER`.
+- `personality.ts` → `DEFAULT_PERSONALITY`, `PERSONALITY_PRESETS`, `PERSONALITY_SLIDERS` e as
+  listas de opções (tom, estilo, emojis, tamanho).
+- `knowledge-base.ts` → `MOCK_KNOWLEDGE_FILES`, `getFileTypeFromName`, `formatFileSize` e
+  rótulos de tipo.
 - `conversations.ts` → `MOCK_CONVERSATIONS`, `MOCK_MESSAGES`, `MOCK_ASSISTANT_REPLIES`.
 - `subscription.ts` → `DEMO_SUBSCRIPTION`, `PLANS`.
 
@@ -498,7 +574,13 @@ automaticamente.
 São os **blocos de construção burros** (sem regra de negócio): `button`, `input`, `label`,
 `textarea`, `card`, `switch`, `badge`, `avatar`, `separator`, `scroll-area`, `skeleton`,
 `progress`, `alert`, `dialog`, `sheet`, `dropdown-menu`, `tabs`, `tooltip`, `accordion`,
-`sonner`.
+`sonner`, `slider`, `select`, `radio-group`.
+
+> **Adicionados na v2:** `slider` (deslizadores de personalidade), `select` (tom/estilo/emojis/
+> tamanho) e `radio-group`. Trouxeram as deps `@radix-ui/react-slider`,
+> `@radix-ui/react-select` e `@radix-ui/react-radio-group`. Os estados visuais de arquivo
+> reutilizam os tokens existentes (`success`, `warning`, `destructive`) — nenhum token novo foi
+> necessário.
 
 Padrões que você verá nesses arquivos:
 - **`forwardRef`** para permitir refs.
@@ -656,6 +738,8 @@ condicionais.
 | **Validação com Zod** | Schema único como fonte da verdade; tipos derivados automaticamente |
 | **`ROUTES`/`STORAGE_KEYS` centralizados** | Evita strings mágicas espalhadas; refator seguro |
 | **Proteção de rota só no `AppLayout` (+guard no Chat)** | Simples e suficiente para mock; ponto único para evoluir com auth real |
+| **`AgentSettings` v2 aditivo + bump de storage key** | Mantivemos as chaves `whatsapp` e `personalUse` (com `enabled`/`connectionStatus`) e só **adicionamos** `agent`, `basePersonality`, `baseInstructions`, `knowledgeBase` e os campos de herança/instruções por canal. Como o shape mudou, subimos a chave para `flowassist_settings_v2`, evitando que dados antigos quebrem a UI. Consumidores existentes (`nav-items`, guard do Chat, `quick-stats`) seguem lendo `settings.whatsapp.*`/`settings.personalUse.*` sem alteração |
+| **Base de Conhecimento em context próprio (em memória)** | Isola a simulação de upload/processamento; a lista reinicia no refresh (demo). No futuro, o backend é a fonte da verdade |
 
 ---
 
@@ -672,11 +756,23 @@ contexts**, não a UI. Roteiro sugerido:
    conexão (ex.: OAuth/QR + webhooks). O `connectionStatus` passa a refletir o backend.
 4. **IA real:** em `chat-context.tsx`, no `sendMessage`, substituir a escolha de
    `MOCK_ASSISTANT_REPLIES` por uma chamada ao backend/LLM (idealmente com streaming).
-   O `TypingIndicator` já está pronto para isso.
-5. **Assinatura real:** integrar checkout (ex.: Stripe) na `SubscriptionPage` e buscar plano
+   O `TypingIndicator` já está pronto para isso. A **personalidade** (`basePersonality` ou a
+   do canal) vira parâmetros do modelo/prompt (ex.: `temperature`) e as **instruções**
+   (`baseInstructions` + `instructions` do canal) compõem o *system prompt*.
+5. **Base de Conhecimento (RAG) real:** em `knowledge-base-context.tsx`, trocar a simulação por
+   um pipeline real: upload para storage → extração de texto → *chunking* → geração de
+   *embeddings* → indexação em banco vetorial. Os campos `chunks`/`vectors`/`indexedAt` de
+   `KnowledgeFile` passam a refletir o processamento real. No `sendMessage`, antes de chamar o
+   LLM, fazer **busca semântica** nos arquivos do agente (respeitando `useSharedKnowledgeBase`
+   por canal) e injetar o contexto recuperado no prompt.
+6. **Assinatura real:** integrar checkout (ex.: Stripe) na `SubscriptionPage` e buscar plano
    atual da API.
-6. **Mocks:** os arquivos em `src/mocks/` deixam de ser a fonte e viram apenas fallback de
+7. **Mocks:** os arquivos em `src/mocks/` deixam de ser a fonte e viram apenas fallback de
    testes/Storybook (ou são removidos).
+
+> **Por que a UI não muda:** personalidade, instruções e base de conhecimento já estão
+> modeladas em `AgentSettings`/`KnowledgeFile` e isoladas nos contexts. Sair do mock para o
+> real toca a implementação interna dos providers (e adiciona a camada de API), não as telas.
 
 > Como a UI só conversa com os contexts (e não com os mocks diretamente), trocar a fonte de
 > dados não deve exigir reescrever telas — apenas a implementação interna dos providers e a

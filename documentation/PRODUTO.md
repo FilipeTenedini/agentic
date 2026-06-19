@@ -18,7 +18,7 @@
 7. [Jornada do cliente (passo a passo)](#7-jornada-do-cliente-passo-a-passo)
 8. [Funcionalidades em detalhe](#8-funcionalidades-em-detalhe)
 9. [Planos e limites](#9-planos-e-limites)
-10. [Linguagem e tom de voz](#10-linguagem-e-tom-de-voz)
+10. [Linguagem e comunicação](#10-linguagem-e-comunicação)
 11. [Estado atual: o que é demonstração](#11-estado-atual-o-que-é-demonstração)
 12. [Roadmap de produto](#12-roadmap-de-produto)
 13. [Perguntas frequentes (FAQ)](#13-perguntas-frequentes-faq)
@@ -100,12 +100,30 @@ bonito de usar."
 Internamente, o time pode chamar de "agente de IA". Externamente, sempre usamos linguagem
 de benefício: "seu assistente responde", "seu assistente te ajuda", "ative seu assistente".
 
-O Assistente tem **dois modos de uso**, que o cliente liga de forma independente:
+O Assistente tem **dois canais de atuação**, que o cliente liga de forma independente:
 
 1. **WhatsApp** — o assistente responde os clientes finais automaticamente.
 2. **Uso Pessoal** — o assistente ajuda o próprio dono dentro do painel, via chat interno.
 
 O cliente pode usar **um, outro, os dois ou nenhum** — total flexibilidade.
+
+### O Assistente é totalmente personalizável
+
+A tela **"Meu Agente"** deixou de ser apenas um interruptor de liga/desliga: ela é agora o
+**centro de configuração** do assistente. Nela o cliente define:
+
+- **Personalidade** — como o assistente se comporta e se comunica (formalidade, criatividade,
+  estilo de escrita, uso de emojis, tamanho das respostas, etc.).
+- **Instruções do Assistente** — um campo livre onde o cliente escreve as regras do negócio,
+  o contexto da empresa e o que o assistente deve (ou não deve) fazer.
+- **Base de Conhecimento** — materiais (PDFs, planilhas, documentos, imagens) que o
+  assistente consulta para responder com mais contexto.
+- **Configuração por canal** — cada canal (WhatsApp e Uso Pessoal) pode **compartilhar** a
+  mesma personalidade e base de conhecimento **ou** ter as suas próprias, além de instruções
+  específicas.
+
+> Pense em WhatsApp e Uso Pessoal como **dois assistentes** que partem de uma mesma base, mas
+> que você pode ajustar separadamente para cada situação.
 
 ---
 
@@ -127,13 +145,25 @@ entrar).
 
 | Tela | Para que serve |
 | --- | --- |
-| **Dashboard** | Visão geral: boas-vindas, próximos passos e resumo de uso |
-| **Meu Agente** | Ligar/desligar WhatsApp e Uso Pessoal — o coração do produto |
+| **Dashboard** | Visão geral: boas-vindas, status do agente, saúde da base, conversas e pendências |
+| **Meu Agente** | Centro de configuração do assistente: Visão Geral, Personalidade, Base de Conhecimento, Instruções e Canais |
 | **Chat** | Conversar com o assistente (aparece só quando o Uso Pessoal está ligado) |
 | **Configurações** | Preferências gerais: tema, notificações, idioma |
 | **Perfil** | Dados pessoais: nome, email e foto |
 | **Assinatura** | Plano atual, data de renovação e limites de uso |
 | **Ajuda** | Perguntas frequentes e contato com o suporte |
+
+### Seções de "Meu Agente"
+
+A tela "Meu Agente" é organizada em abas:
+
+| Aba | Para que serve |
+| --- | --- |
+| **Visão geral** | Resumo do agente: nome, status, canais ativos e configurações pendentes |
+| **Personalidade** | Define o comportamento e o estilo de comunicação do assistente |
+| **Base de Conhecimento** | Envio e gestão dos materiais que o assistente consulta |
+| **Instruções** | Campo livre com as regras e o contexto do negócio |
+| **Canais** | Configuração específica do WhatsApp e do Uso Pessoal (herança ou personalização) |
 
 ---
 
@@ -171,12 +201,40 @@ WhatsApp.
 
 ### 7.4 Ligando o Uso Pessoal e usando o Chat
 
-1. Em **Meu Agente**, o cliente liga o botão de **Uso Pessoal**.
+1. Em **Meu Agente**, na aba **Canais**, o cliente liga o botão de **Uso Pessoal**.
 2. Um novo item, **"Chat"**, aparece no menu lateral.
 3. No Chat, o cliente vê conversas anteriores e pode **iniciar uma nova**.
 4. Ele digita uma mensagem, o assistente mostra **"digitando..."** e responde.
 
-### 7.5 Cuidando da conta
+### 7.5 Personalizando o comportamento do assistente
+
+1. O cliente abre **Meu Agente** e vai à aba **Personalidade**.
+2. Pode começar por um **modelo pronto** (Atendimento, Vendas, Suporte técnico, Corporativo)
+   ou ajustar manualmente os controles: espontaneidade, criatividade, formalidade,
+   objetividade, nível técnico, estilo de escrita, uso de emojis e tamanho médio das respostas.
+3. Quem prefere termos técnicos pode ligar o **"modo avançado"**.
+4. As mudanças são **salvas automaticamente**.
+
+### 7.6 Ensinando o assistente (Base de Conhecimento)
+
+1. Na aba **Base de Conhecimento**, o cliente **arrasta arquivos** ou clica para selecioná-los
+   (PDF, DOCX, TXT, CSV, XLSX e imagens).
+2. Cada arquivo passa por estados visuais: **enviando → processando → pronto** (ou **erro**,
+   com opção de tentar novamente).
+3. O cliente acompanha um resumo da saúde da base (prontos, em processo, com erro).
+
+> Nesta fase, **nada é realmente processado** — é uma demonstração que prepara a futura
+> "memória" do assistente (ver seção 11 e roadmap).
+
+### 7.7 Configurando cada canal de forma independente
+
+1. Na aba **Canais**, cada canal (WhatsApp e Uso Pessoal) tem seus próprios ajustes.
+2. O cliente decide se o canal **usa a personalidade base** ou define **uma personalidade
+   própria**.
+3. Decide também se o canal **usa a base de conhecimento compartilhada**.
+4. E pode escrever **instruções específicas** só para aquele canal.
+
+### 7.8 Cuidando da conta
 
 - **Perfil:** editar nome e trocar a foto.
 - **Assinatura:** ver o plano, quando renova e quanto já usou; trocar de plano.
@@ -202,26 +260,55 @@ Tem o objetivo único de **converter visitante em cadastro**. É composta por:
 
 ### 8.2 Dashboard
 
-A "casa" do cliente depois do login. Mostra:
+A "casa" do cliente depois do login. Reflete o conceito de produto baseado em agentes. Mostra:
 
 - **Saudação personalizada** ("Bom dia, Maria") que muda conforme o horário.
 - **Checklist de ativação** (some quando concluído).
-- **Cartões de resumo:** status do WhatsApp, número de conversas no chat e mensagens
-  respondidas.
+- **Cartões de resumo:** status do WhatsApp, conversas no chat, **arquivos enviados** e
+  mensagens respondidas.
+- **Status do agente:** se está ativo/pausado e quais canais estão ligados.
+- **Saúde da base de conhecimento:** quantos arquivos estão prontos, em processamento ou com
+  erro.
+- **Últimas conversas:** atalho para as conversas mais recentes do chat.
+- **Configurações pendentes:** lista do que ainda falta configurar (ex.: ativar um canal,
+  escrever instruções, adicionar arquivos), com atalho direto para resolver.
 - **Atividade recente:** lista das últimas ações relevantes.
 
 ### 8.3 Meu Agente (funcionalidade principal)
 
-É onde o cliente decide **como** quer usar o assistente. Dois cartões, cada um com um botão
-de liga/desliga:
+É o **centro de configuração** do assistente, organizado em abas.
 
-**WhatsApp**
-- Ligado → mostra o número conectado, o status da conexão e um botão "Reconectar".
-- Desligado → o painel some e o status fica como "Desconectado".
+**Visão geral**
+- Nome, descrição e **status** do agente (Em configuração / Ativo / Pausado).
+- Resumo rápido: canais ativos e arquivos prontos na base de conhecimento.
+- **Configurações pendentes** com botão "Resolver" que leva à aba certa.
 
-**Uso Pessoal**
-- Ligado → libera o **Chat** no menu e mostra um atalho "Abrir chat".
-- Desligado → o Chat some do menu.
+**Personalidade**
+- **Modelos prontos** (Atendimento, Vendas, Suporte técnico, Corporativo) aplicáveis com um
+  clique.
+- **Controles de comportamento** (deslizadores de 0 a 100): espontaneidade, criatividade,
+  formalidade, objetividade e nível técnico.
+- **Escolhas de estilo:** estilo de escrita, uso de emojis e tamanho médio das respostas.
+- **Modo avançado** que revela os nomes técnicos dos controles (ex.: "Temperatura").
+
+**Instruções do Assistente**
+- Campo de texto longo para o cliente definir, em linguagem natural: como responder, como não
+  responder, regras de negócio e contexto da empresa.
+- Salvo automaticamente.
+
+**Base de Conhecimento**
+- Área de **upload** (arrastar/soltar ou selecionar) para PDF, DOCX, TXT, CSV, XLSX e imagens.
+- Lista de arquivos com **estados visuais**: enviando, processando, pronto ou erro (com
+  "tentar novamente").
+- Resumo de saúde: total, prontos, em processo e com erro.
+
+**Canais**
+- Para cada canal (WhatsApp e Uso Pessoal):
+  - Liga/desliga (o WhatsApp mostra número conectado, status e "Reconectar"; o Uso Pessoal
+    libera o Chat no menu).
+  - **"Usar a personalidade base"** — desligar revela uma personalidade própria do canal.
+  - **"Usar a base de conhecimento compartilhada"**.
+  - **Instruções específicas** daquele canal.
 
 ### 8.4 Chat interno
 
@@ -260,6 +347,19 @@ Inspirado no ChatGPT, com uma experiência premium:
 - **Cartão de contato:** email e horário do suporte.
 - **Formulário** para enviar uma mensagem ao suporte.
 
+### 8.9 Regras de negócio do assistente
+
+- **Personalidade base é o padrão.** Por padrão, todos os canais herdam a mesma personalidade
+  e a mesma base de conhecimento. O cliente pode quebrar essa herança por canal.
+- **Herança por canal.** Cada canal pode, de forma independente: usar ou não a personalidade
+  base; usar ou não a base de conhecimento compartilhada; ter instruções próprias.
+- **Pronto para responder bem.** Um canal "responde melhor" quando tem instruções definidas e
+  pelo menos um arquivo pronto na base — o Dashboard sinaliza o que falta.
+- **Base de conhecimento compartilhada.** A base é única para o agente; um canal apenas
+  escolhe usá-la ou não. (No futuro, isso definirá o que cada canal "enxerga".)
+- **Salvamento automático.** As configurações de personalidade, instruções e canais são salvas
+  automaticamente e persistem no navegador.
+
 ---
 
 ## 9. Planos e limites
@@ -279,7 +379,7 @@ Starter, com parte dos limites já consumida, para ilustrar como as barras de us
 
 ---
 
-## 10. Linguagem e tom de voz
+## 10. Linguagem e comunicação
 
 **Princípios de comunicação com o cliente:**
 
@@ -321,6 +421,14 @@ tecnologia pesada por trás.
 - **Não há conexão real com o WhatsApp.** O status "Conectado" e o número são ilustrativos.
 - **Não há inteligência artificial real.** As respostas do chat são mensagens prontas e
   rotativas, apenas para demonstrar a experiência.
+- **A Personalidade e as Instruções não afetam respostas reais.** Os controles são salvos e
+  exibidos, mas como não há IA, não mudam o comportamento de um modelo de verdade.
+- **A Base de Conhecimento não é processada.** O upload, os estados (enviando, processando,
+  pronto, erro) e a lista de arquivos são **apenas visuais**. Não há leitura de arquivo,
+  vetorização, indexação ou busca semântica (RAG). A arquitetura, porém, já está preparada
+  para isso.
+- **A configuração por canal é estrutural.** A herança e as instruções por canal são salvas,
+  mas, sem IA, ainda não alteram respostas reais.
 - **Não há cobrança real.** Trocar de plano não gera pagamento.
 - **Os dados ficam só no navegador do cliente.** Se ele limpar o navegador, os dados são
   reiniciados. Não há servidor guardando informações.
@@ -338,7 +446,7 @@ Evolução planejada após a validação do MVP:
 | --- | --- | --- |
 | **2** | Conta real | Servidor, login seguro e recuperação de senha de verdade |
 | **3** | WhatsApp real | Integração oficial com o WhatsApp para enviar e receber mensagens |
-| **4** | Inteligência real | Respostas geradas por IA de verdade, com base de conhecimento do cliente |
+| **4** | Inteligência real | Respostas por IA de verdade, usando a **Personalidade**, as **Instruções** e a **Base de Conhecimento** já configuradas: leitura dos arquivos, vetorização, busca semântica (RAG) e contexto personalizado por canal |
 | **5** | Múltiplos assistentes | Vários assistentes com personalidades e canais diferentes |
 | **6** | Equipes | Vários usuários por conta, com papéis e permissões |
 | **7** | Relatórios | Métricas de atendimento, tempo de resposta e satisfação |
@@ -375,6 +483,11 @@ As mesmas perguntas aparecem na página inicial e na tela de Ajuda:
 | **Assistente / Meu Agente** | O ajudante inteligente do cliente. Nunca chamamos de "IA" para o cliente |
 | **WhatsApp** | Canal em que o assistente atende os clientes finais |
 | **Uso Pessoal** | Modo em que o assistente ajuda o próprio dono, via chat interno |
+| **Canal** | Cada meio em que o assistente atua (WhatsApp ou Uso Pessoal), com configuração própria |
+| **Personalidade** | Conjunto de ajustes de comportamento e estilo (tom, formalidade, emojis, etc.) |
+| **Instruções do Assistente** | Texto livre com as regras e o contexto que o assistente deve seguir |
+| **Base de Conhecimento** | Materiais (PDFs, planilhas, documentos, imagens) que o assistente consulta |
+| **Herança de configuração** | Quando um canal usa a personalidade/base "base" em vez de uma própria |
 | **Chat** | Tela de conversa com o assistente, parecida com o ChatGPT |
 | **Dashboard / Painel** | Tela inicial após o login, com resumo e próximos passos |
 | **Onboarding** | Checklist de boas-vindas que guia os primeiros passos |

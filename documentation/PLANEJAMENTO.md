@@ -29,6 +29,21 @@ todos:
   - id: polish-responsive
     content: Responsividade mobile, empty/loading states, toasts e microinterações
     status: completed
+  - id: agent-config-hub
+    content: "Meu Agente como centro de configuração com abas (Visão geral, Personalidade, Base de Conhecimento, Instruções, Canais)"
+    status: completed
+  - id: personality
+    content: Personalidade configurável (presets, deslizadores, selects, modo avançado) persistida
+    status: completed
+  - id: knowledge-base
+    content: "Base de Conhecimento mockada: upload, estados uploading/processing/ready/error e retry"
+    status: completed
+  - id: channels-inheritance
+    content: Configuração por canal com herança de personalidade/base e instruções específicas
+    status: completed
+  - id: dashboard-v2
+    content: "Dashboard com status do agente, arquivos enviados, últimas conversas, saúde da base e pendências"
+    status: completed
 isProject: false
 ---
 
@@ -87,8 +102,12 @@ Oferecer uma plataforma SaaS onde pequenas e médias empresas (e profissionais a
 │
 └── /app  (área logada — prefixo sugerido para rotas protegidas)
     ├── /app/dashboard
-    ├── /app/meu-agente
-    │   └── (sub-seções via tabs ou scroll: WhatsApp | Uso Pessoal)
+    ├── /app/meu-agente        [centro de configuração; abas via ?tab=]
+    │   ├── ?tab=overview      (Visão geral — padrão)
+    │   ├── ?tab=personality   (Personalidade)
+    │   ├── ?tab=knowledge     (Base de Conhecimento)
+    │   ├── ?tab=instructions  (Instruções)
+    │   └── ?tab=channels      (Canais: Uso Pessoal | WhatsApp)
     ├── /app/chat               [visível no sidebar apenas se Uso Pessoal = ativo]
     │   └── /app/chat/:conversationId
     ├── /app/configuracoes
@@ -96,6 +115,12 @@ Oferecer uma plataforma SaaS onde pequenas e médias empresas (e profissionais a
     ├── /app/assinatura
     └── /app/ajuda
 ```
+
+> **Decisão de implementação:** as sub-seções de "Meu Agente" são **abas** dentro de uma única
+> página (`AgentPage`), sincronizadas com a URL via query param `?tab=`. Isso mantém o
+> deep-linking (ex.: o Dashboard leva direto a `?tab=knowledge`) sem multiplicar rotas. As
+> constantes de sub-rotas existem em `ROUTES` como referência para uma futura migração a rotas
+> aninhadas, se desejado.
 
 ### Hierarquia de rotas (React Router)
 
@@ -126,8 +151,11 @@ Item condicional:
 
 ### Breadcrumbs (rotas internas)
 
-- Meu Agente > WhatsApp
-- Meu Agente > Uso Pessoal
+- Meu Agente > Visão geral
+- Meu Agente > Personalidade
+- Meu Agente > Base de Conhecimento
+- Meu Agente > Instruções
+- Meu Agente > Canais > [WhatsApp | Uso Pessoal]
 - Chat > [Nome da conversa]
 - Configurações > [Seção ativa]
 
@@ -240,7 +268,57 @@ flowchart TD
     HideChat --> RedirectDash[Se em /app/chat, redirecionar para /app/meu-agente]
 ```
 
+---
 
+### 3.5a Configurar Personalidade
+
+```mermaid
+flowchart TD
+    Personality[Meu Agente > Personalidade] --> Choice{Como configurar?}
+    Choice -->|Modelo pronto| Preset[Aplicar preset: Atendimento / Vendas / Tecnico / Corporativo]
+    Choice -->|Manual| Sliders[Ajustar deslizadores + selects]
+    Preset --> Save[Salvo automaticamente no SettingsContext]
+    Sliders --> Save
+    Save --> Persist[(localStorage)]
+    Sliders --> Advanced{Modo avancado?}
+    Advanced -->|Sim| TechLabels[Mostra termos tecnicos]
+```
+
+---
+
+### 3.5b Upload na Base de Conhecimento (máquina de estados)
+
+```mermaid
+flowchart TD
+    KB[Meu Agente > Base de Conhecimento] --> Drop[Arrastar/soltar ou selecionar arquivos]
+    Drop --> Uploading[Estado: enviando + barra de progresso]
+    Uploading --> Processing[Estado: processando + barra de progresso]
+    Processing --> Result{Resultado mock}
+    Result -->|sucesso| Ready[Estado: pronto - trechos indexados]
+    Result -->|falha ~15%| Error[Estado: erro + Tentar novamente]
+    Error -->|retry| Uploading
+    Ready --> Remove[Remover arquivo]
+```
+
+> Estados do arquivo (`KnowledgeFileStatus`): `uploading` -> `processing` -> `ready` | `error`.
+> A transição é simulada com timers no `KnowledgeBaseContext`. Nada é realmente processado.
+
+---
+
+### 3.5c Configurar canal com herança
+
+```mermaid
+flowchart TD
+    Channels[Meu Agente > Canais] --> Pick[Escolher canal: WhatsApp ou Uso Pessoal]
+    Pick --> Enable[Ligar o canal]
+    Enable --> SharedP{Usar personalidade base?}
+    SharedP -->|Sim| InheritP[Herda basePersonality]
+    SharedP -->|Nao| CustomP[Editor de personalidade do canal]
+    Enable --> SharedKB{Usar base de conhecimento compartilhada?}
+    SharedKB -->|Sim| InheritKB[Herda knowledgeBase do agente]
+    SharedKB -->|Nao| OwnKB[Canal sem a base compartilhada]
+    Enable --> Instr[Instrucoes especificas do canal]
+```
 
 ---
 
@@ -370,9 +448,21 @@ flowchart TD
 Cada tela deve prever:
 
 - **Loading:** skeleton screens (Shadcn Skeleton)
-- **Empty:** ilustração leve + copy + CTA (ex: "Nenhuma conversa ainda")
+- **Empty:** ilustração leve + copy + CTA (ex: "Nenhuma conversa ainda", "Nenhum arquivo ainda")
 - **Error:** Alert destructive + ação de retry
 - **Success:** toast + atualização visual
+
+**Estados específicos da Base de Conhecimento (por arquivo):**
+
+| Estado | Visual |
+| ------ | ------ |
+| `uploading` | Badge "Enviando" + barra de progresso (azul) |
+| `processing` | Badge "Processando" (spinner) + barra de progresso (âmbar) |
+| `ready` | Badge "Pronto" (verde) + nº de trechos indexados |
+| `error` | Badge "Erro" (vermelho) + mensagem + botão "Tentar novamente" |
+
+**Estado de "configuração pendente":** cards/itens com borda tracejada e ação "Resolver" que
+leva à aba correspondente (Dashboard e Visão Geral do agente).
 
 ### 4.6 Onboarding (MVP leve)
 
@@ -390,6 +480,69 @@ Progresso salvo em mock state/localStorage.
 - Envio de mensagem: fade-in da bubble
 - Sidebar item ativo: highlight + borda lateral
 - Hover em cards: elevação sutil (`shadow-md`)
+- Deslizadores de personalidade: valor numérico atualiza ao arrastar
+- Upload: realce da dropzone ao arrastar arquivo (border + bg accent)
+
+### 4.8 Wireframes conceituais (Meu Agente v2)
+
+**Meu Agente — abas (topo):**
+
+```
+[ Visão geral ] [ Personalidade ] [ Base de Conhecimento ] [ Instruções ] [ Canais ]
+```
+
+**Aba Personalidade:**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Personalidade                         [ Modo avançado ⬤ ]   │
+│ Modelos: [Atendimento][Vendas][Suporte técnico][Corporativo]│
+│ ─────────────────────────────────────────────────────────  │
+│ Espontaneidade   ────●─────  50    Criatividade ───●──  50  │
+│ Formalidade      ─────●────  60    Objetividade ───●──  55  │
+│ Nível técnico    ──●───────  40                             │
+│ Estilo [Equilibrado ▾]   Emojis [Às vezes ▾]               │
+│ Tamanho [Média ▾]                                          │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Aba Base de Conhecimento:**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ [Arquivos: 5] [Prontos: 3] [Em processo: 1] [Com erro: 1]  │
+│ ┌───────────── dropzone ──────────────┐                    │
+│ │  ⬆  Arraste arquivos ou clique       │                    │
+│ └─────────────────────────────────────┘                    │
+│ 📄 Catálogo.pdf            [Pronto ✓]   128 trechos   🗑     │
+│ 📊 Tabela.xlsx             [Processando ▰▰▰▱] 62%      🗑     │
+│ 📄 Base.csv                [Erro ⚠]  Tentar novamente ↻ 🗑   │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Aba Canais (card por canal):**
+
+```
+┌──────────────── WhatsApp ──────────────────  [⬤ ligado] ──┐
+│ +55 11 98765-4321   [Conectado ✓]  [Reconectar ↻]         │
+│ Usar a personalidade base ......................... [⬤]   │
+│   (se desligado) → editor de personalidade do canal       │
+│ Usar a base de conhecimento compartilhada ......... [⬤]   │
+│ Instruções específicas deste canal: [ textarea ]          │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Dashboard (novos blocos):**
+
+```
+[ WhatsApp ] [ Conversas ] [ Arquivos enviados ] [ Mensagens ]
+┌ Status do agente ─────────┐ ┌ Saúde da base ───────────┐
+│ Ativo · WhatsApp/Pessoal  │ │ 3 de 5 prontos ▰▰▰▱▱      │
+└───────────────────────────┘ └──────────────────────────┘
+┌ Últimas conversas ────────┐ ┌ Configurações pendentes ─┐
+│ • Ideias para post ...    │ │ ☐ Adicione arquivos →    │
+└───────────────────────────┘ └──────────────────────────┘
+```
 
 ---
 
@@ -491,8 +644,14 @@ Base unit: **4px**
 - Alert
 - Tooltip
 - Form (react-hook-form + zod — validação)
-- Progress (limites de uso assinatura)
+- Progress (limites de uso assinatura; progresso de upload/processamento)
 - Accordion (FAQ landing e ajuda)
+
+**Adicionados na v2 (Meu Agente):**
+
+- **Slider** (`@radix-ui/react-slider`) — deslizadores de personalidade (0–100)
+- **Select** (`@radix-ui/react-select`) — estilo de escrita, emojis, tamanho da resposta
+- **RadioGroup** (`@radix-ui/react-radio-group`) — disponível para escolhas mutuamente exclusivas
 
 ### 5.6 Ícones (Lucide)
 
@@ -513,6 +672,17 @@ Base unit: **4px**
 | Conectado       | `CheckCircle2`                                                  |
 | Desconectado    | `XCircle`                                                       |
 | Menu mobile     | `Menu`                                                          |
+| Personalidade   | `SlidersHorizontal`                                             |
+| Base de Conhec. | `Database` / `BookOpen`                                          |
+| Instruções      | `MessageSquareText`                                             |
+| Canais          | `Radio`                                                         |
+| Upload          | `UploadCloud`                                                   |
+| Arquivo         | `FileText` / `FileSpreadsheet` / `Image`                        |
+| Processando     | `Loader2` (spin)                                                |
+| Erro/atenção    | `TriangleAlert`                                                 |
+| Tentar novamente| `RotateCw`                                                      |
+| Aplicar preset  | `Wand2`                                                         |
+| Pendências      | `ListChecks`                                                    |
 
 
 ### 5.7 Estados visuais de componentes
@@ -590,24 +760,38 @@ Base unit: **4px**
 ### 6.5 Componentes de Dashboard
 
 
-| Componente            | Descrição                                       |
-| --------------------- | ----------------------------------------------- |
-| `WelcomeBanner`       | Saudação personalizada com nome                 |
-| `OnboardingChecklist` | Passos de ativação                              |
-| `QuickStats`          | Cards: status WhatsApp, conversas, uso do plano |
-| `RecentActivity`      | Lista mock de atividades recentes               |
+| Componente                 | Descrição                                                  |
+| -------------------------- | ---------------------------------------------------------- |
+| `WelcomeBanner`            | Saudação personalizada com nome                            |
+| `OnboardingChecklist`      | Passos de ativação                                         |
+| `QuickStats`               | Cards: WhatsApp, conversas, **arquivos enviados**, mensagens |
+| `AgentStatusCard`          | Status do agente + status de cada canal + atalho           |
+| `KnowledgeHealthCard`      | Saúde da base: prontos / em processo / com erro            |
+| `RecentConversationsCard`  | Últimas conversas com atalho para o chat                   |
+| `PendingSetupCard`         | Configurações pendentes com links "Resolver"              |
+| `RecentActivity`           | Lista mock de atividades recentes (inclui knowledge/personality) |
 
 
 ### 6.6 Componentes de Meu Agente
 
 
-| Componente                  | Descrição                        |
-| --------------------------- | -------------------------------- |
-| `AgentConfigPage`           | Container das seções             |
-| `WhatsAppConfigCard`        | Toggle + painel condicional      |
-| `WhatsAppConnectionPanel`   | Número, status, botão reconectar |
-| `PersonalUseConfigCard`     | Toggle + link para chat          |
-| `ConnectionStatusIndicator` | Badge + ícone animado            |
+| Componente                  | Descrição                                                            |
+| --------------------------- | ------------------------------------------------------------------- |
+| `AgentPage`                 | Container com abas (Tabs) sincronizadas via `?tab=`                  |
+| `AgentOverview`             | Visão geral: status, resumo e configurações pendentes               |
+| `PersonalityForm`           | Aba Personalidade: presets + modo avançado + editor                 |
+| `PersonalityEditor`         | Conjunto de deslizadores + selects (reutilizável base/canal)        |
+| `PersonalitySlider`         | Deslizador rotulado (0–100) com tooltip e min/max                   |
+| `PersonalityPresets`        | Botões de modelos prontos                                           |
+| `SystemInstructionsEditor`  | Textarea longa para as instruções do assistente                     |
+| `KnowledgeBaseSection`      | Resumo + upload + lista de arquivos                                 |
+| `KnowledgeFileUpload`       | Dropzone mock (arrastar/soltar ou selecionar)                       |
+| `KnowledgeFileList`         | Lista de arquivos (ou empty state)                                  |
+| `KnowledgeFileItem`         | Linha do arquivo: ícone por tipo, badge de status, progresso, ações |
+| `ChannelConfigCard`         | Card genérico por canal: toggle, herança e instruções               |
+| `WhatsAppConfigCard`        | Wrapper de `ChannelConfigCard` para o WhatsApp                      |
+| `PersonalUseConfigCard`     | Wrapper de `ChannelConfigCard` para o Uso Pessoal                   |
+| `ConnectionStatusBadge`     | Badge + ícone animado (compartilhado)                              |
 
 
 ### 6.7 Componentes de Chat
@@ -650,12 +834,13 @@ Base unit: **4px**
 ### 6.10 Providers / Contextos (sem código, apenas contrato)
 
 
-| Provider           | Estado                                                        |
-| ------------------ | ------------------------------------------------------------- |
-| `AuthProvider`     | user, isAuthenticated, login, logout, register, updateProfile |
-| `SettingsProvider` | whatsApp, personalUse, toggles, persistência localStorage     |
-| `ChatProvider`     | conversations, messages, sendMessage, createConversation      |
-| `ThemeProvider`    | theme light/dark                                              |
+| Provider                | Estado                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `AuthProvider`          | user, isAuthenticated, login, logout, register, updateProfile                           |
+| `SettingsProvider`      | agente, personalidade base, instruções, canais (toggles + herança), persistência        |
+| `KnowledgeBaseProvider` | files, summary, addFiles, removeFile, retryFile (simula upload/processamento)            |
+| `ChatProvider`          | conversations, messages, sendMessage, createConversation                                |
+| `ThemeProvider`         | theme light/dark                                                                        |
 
 
 ---
@@ -800,29 +985,84 @@ interface User {
 
 ```typescript
 interface AgentSettings {
-  whatsapp: {
-    enabled: boolean
-    phoneNumber?: string        // ex: "+55 11 98765-4321"
-    connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
-    connectedAt?: string
-  }
-  personalUse: {
-    enabled: boolean
-  }
+  agent: { name: string; avatarUrl?: string; status: 'draft' | 'active' | 'paused'; description?: string }
+  basePersonality: AgentPersonality       // personalidade compartilhada
+  baseInstructions: string                // "Instruções do Assistente" globais
+  knowledgeBase: { files: KnowledgeFile[] } // estrutura (lista viva no KnowledgeBaseContext)
+  whatsapp: WhatsAppChannelConfig         // enabled/connectionStatus + herança/instruções
+  personalUse: PersonalUseChannelConfig   // enabled + herança/instruções
+}
+
+interface ChannelConfigBase {
+  enabled: boolean
+  useSharedPersonality: boolean
+  useSharedKnowledgeBase: boolean
+  personality?: AgentPersonality          // usado só quando useSharedPersonality = false
+  instructions: string
+}
+interface WhatsAppChannelConfig extends ChannelConfigBase {
+  phoneNumber?: string
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+  connectedAt?: string
+}
+type PersonalUseChannelConfig = ChannelConfigBase
+```
+
+**Estado inicial (novo usuário):** agent.status `draft`; canais desligados; herança ligada;
+base de conhecimento vazia; instruções vazias.
+
+**Estado demo (usuário demo logado):** agent.status `active`; WhatsApp `connected`
+(`"+55 11 98765-4321"`); Uso Pessoal ligado; personalidade `DEFAULT_PERSONALITY`; instruções
+de exemplo; base de conhecimento com `MOCK_KNOWLEDGE_FILES`.
+
+**Persistência:** `localStorage` key `flowassist_settings_v2` (a versão subiu porque o shape
+mudou; evita que dados antigos quebrem a UI).
+
+---
+
+### 8.2a Personalidade (`AgentPersonality`)
+
+```typescript
+interface AgentPersonality {
+  temperature: number      // 0-100
+  creativity: number       // 0-100
+  formality: number        // 0-100
+  objectivity: number      // 0-100
+  technicalLevel: number   // 0-100
+  writingStyle: 'conciso' | 'equilibrado' | 'detalhado' | 'narrativo'
+  emojiUsage: 'nunca' | 'as_vezes' | 'frequente'
+  responseLength: 'curta' | 'media' | 'longa'
 }
 ```
 
-**Estado inicial (novo usuário):**
+- `DEFAULT_PERSONALITY` — valores equilibrados (50–60).
+- `PERSONALITY_PRESETS` — Atendimento, Vendas, Suporte técnico, Corporativo.
+- `PERSONALITY_SLIDERS` — metadados dos deslizadores (label amigável + `advancedLabel`).
+- Mock em `src/mocks/personality.ts`.
 
-- whatsapp.enabled: `false`, status: `disconnected`
-- personalUse.enabled: `false`
+---
 
-**Estado demo (usuário demo logado):**
+### 8.2b Base de Conhecimento (`KnowledgeFile`)
 
-- whatsapp.enabled: `true`, phone: `"+55 11 98765-4321"`, status: `connected`
-- personalUse.enabled: `true`
+```typescript
+type KnowledgeFileType = 'pdf' | 'docx' | 'txt' | 'csv' | 'xlsx' | 'image' | 'other'
+type KnowledgeFileStatus = 'uploading' | 'processing' | 'ready' | 'error'
+interface KnowledgeFile {
+  id: string
+  name: string
+  type: KnowledgeFileType
+  sizeBytes: number
+  status: KnowledgeFileStatus
+  progress?: number          // % durante uploading/processing
+  errorMessage?: string
+  uploadedAt: string
+  chunks?: number; vectors?: number; indexedAt?: string  // placeholders RAG
+}
+```
 
-**Persistência:** `localStorage` key `flowassist_settings`
+- `MOCK_KNOWLEDGE_FILES` cobre os 4 estados (3 ready, 1 processing, 1 error).
+- A lista viva é gerida pelo `KnowledgeBaseContext` (simula `uploading → processing →
+  ready|error` com timers). Mock em `src/mocks/knowledge-base.ts`.
 
 ---
 
@@ -1073,12 +1313,17 @@ flowchart TB
 2. Login/cadastro mock funcional com persistência de sessão
 3. Toggles WhatsApp e Uso Pessoal alteram UI e persistem
 4. Chat envia mensagem e recebe resposta mock com typing indicator
-5. Sidebar dinâmica: Chat só aparece com Uso Pesso
+5. Sidebar dinâmica: Chat só aparece com Uso Pessoal ativo
 6. Landing page completa com todas as seções
 7. Responsivo em mobile, tablet e desktop
 8. Tema claro/escuro (recomendado)
 9. Estados empty, loading e error em telas principais
 10. Zero dependência de backend
+11. "Meu Agente" com abas (Visão geral, Personalidade, Base de Conhecimento, Instruções, Canais), deep-link via `?tab=`
+12. Personalidade: presets, deslizadores, selects e modo avançado; salva e persiste
+13. Base de Conhecimento: upload mock com transições `uploading → processing → ready|error` e retry
+14. Configuração por canal com herança (personalidade/base) e instruções específicas refletidas na UI
+15. Dashboard com os blocos: status do agente, arquivos enviados, últimas conversas, saúde da base e configurações pendentes
 
 ---
 
