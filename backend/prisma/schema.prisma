@@ -1,0 +1,218 @@
+// FlowAssist — schema do banco (PostgreSQL).
+// Convencoes: modelos em PascalCase (API/camelCase), tabelas/colunas em snake_case
+// via @@map / @map para um banco idiomatico. pgvector e usado no RAG (KnowledgeChunk).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// Usuarios e assinatura
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  avatarUrl    String?  @map("avatar_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  agent        Agent?
+  subscription Subscription?
+  activities   Activity[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id        String             @id @default(uuid())
+  userId    String             @unique @map("user_id")
+  plan      String             @default("free") // free | starter | pro | business
+  status    String             @default("active") // active | past_due | canceled
+  renewalAt DateTime?          @map("renewal_at")
+
+  whatsappMsgsUsed    Int @default(0) @map("whatsapp_msgs_used")
+  whatsappMsgsMax     Int @default(100) @map("whatsapp_msgs_max")
+  chatMsgsUsed        Int @default(0) @map("chat_msgs_used")
+  chatMsgsMax         Int @default(50) @map("chat_msgs_max")
+  conversationsUsed   Int @default(0) @map("conversations_used")
+  conversationsMax    Int @default(5) @map("conversations_max")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ---------------------------------------------------------------------------
+// Agente, canais, personalidade e conexao WhatsApp
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id               String   @id @default(uuid())
+  userId           String   @unique @map("user_id")
+  name             String   @default("Meu Assistente")
+  description      String?
+  avatarUrl        String?  @map("avatar_url")
+  status           String   @default("draft") // draft | active | paused
+  baseInstructions String   @default("") @map("base_instructions")
+  // Personalidade base compartilhada (objeto AgentPersonality serializado).
+  basePersonality  Json     @map("base_personality")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channels           ChannelConfig[]
+  whatsappConnection WhatsAppConnection?
+  knowledgeFiles     KnowledgeFile[]
+  knowledgeChunks    KnowledgeChunk[]
+  conversations      Conversation[]
+
+  @@map("agents")
+}
+
+model ChannelConfig {
+  id                     String  @id @default(uuid())
+  agentId                String  @map("agent_id")
+  // 'whatsapp' | 'personalUse' (alinhado ao frontend).
+  channelId              String  @map("channel_id")
+  enabled                Boolean @default(false)
+  useSharedPersonality   Boolean @default(true) @map("use_shared_personality")
+  useSharedKnowledgeBase Boolean @default(true) @map("use_shared_knowledge_base")
+  // Personalidade propria do canal (usada so quando useSharedPersonality = false).
+  personality            Json?
+  instructions           String  @default("")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, channelId])
+  @@map("channel_configs")
+}
+
+model WhatsAppConnection {
+  id               String    @id @default(uuid())
+  agentId          String    @unique @map("agent_id")
+  phoneNumber      String?   @map("phone_number")
+  instanceName     String?   @map("instance_name")
+  connectionStatus String    @default("disconnected") @map("connection_status")
+  connectedAt      DateTime? @map("connected_at")
+  qrCode           String?   @map("qr_code")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_connections")
+}
+
+// ---------------------------------------------------------------------------
+// Base de conhecimento (RAG)
+// ---------------------------------------------------------------------------
+
+model KnowledgeFile {
+  id           String    @id @default(uuid())
+  agentId      String    @map("agent_id")
+  name         String
+  type         String // pdf | docx | txt | csv | xlsx | image | other
+  sizeBytes    Int       @map("size_bytes")
+  status       String    @default("uploading") // uploading | processing | ready | error
+  progress     Int?
+  errorMessage String?   @map("error_message")
+  storageUrl   String?   @map("storage_url")
+  chunks       Int?
+  vectors      Int?
+  indexedAt    DateTime? @map("indexed_at")
+  uploadedAt   DateTime  @default(now()) @map("uploaded_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  agent       Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  chunkList   KnowledgeChunk[]
+
+  @@map("knowledge_files")
+}
+
+model KnowledgeChunk {
+  id         String                       @id @default(uuid())
+  fileId     String                       @map("file_id")
+  agentId    String                       @map("agent_id")
+  content    String
+  chunkIndex Int                          @map("chunk_index")
+  // Vetor de embedding (1536 dims, ex.: OpenAI text-embedding-3-small).
+  // Consultado via SQL bruto no RAG real; nulo no mock mode.
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime                     @default(now()) @map("created_at")
+
+  file  KnowledgeFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  agent Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge_chunks")
+}
+
+// ---------------------------------------------------------------------------
+// Conversas e mensagens
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id            String    @id @default(uuid())
+  agentId       String    @map("agent_id")
+  // 'whatsapp' | 'personalUse'
+  channel       String    @default("personalUse")
+  externalId    String?   @map("external_id")
+  contactName   String?   @map("contact_name")
+  contactPhone  String?   @map("contact_phone")
+  title         String    @default("Nova conversa")
+  lastMessage   String    @default("") @map("last_message")
+  lastMessageAt DateTime  @default(now()) @map("last_message_at")
+  messageCount  Int       @default(0) @map("message_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agent    Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  role           String // user | assistant
+  content        String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+// ---------------------------------------------------------------------------
+// Feed de atividades (dashboard)
+// ---------------------------------------------------------------------------
+
+model Activity {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  type        String // whatsapp | chat | config | knowledge | personality
+  description String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activities")
+}

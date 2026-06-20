@@ -2,14 +2,16 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 
-import { useLocalStorage } from "@/hooks/use-local-storage";
-import { STORAGE_KEYS } from "@/lib/constants";
-import { DEMO_SETTINGS, MOCK_PHONE_NUMBER } from "@/mocks/agent-settings";
+import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
+import { INITIAL_SETTINGS } from "@/mocks/agent-settings";
 import type {
   AgentPersonality,
   AgentProfile,
@@ -40,39 +42,89 @@ interface SettingsContextValue {
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useLocalStorage<AgentSettings>(
-    STORAGE_KEYS.settings,
-    DEMO_SETTINGS
-  );
-  const timers = useRef<number[]>([]);
+  const { isAuthenticated } = useAuth();
+  const [settings, setSettings] = useState<AgentSettings>(INITIAL_SETTINGS);
+  const pollRef = useRef<number | null>(null);
 
-  const runConnectingFlow = useCallback(() => {
-    const timer = window.setTimeout(() => {
-      setSettings((prev) => ({
-        ...prev,
-        whatsapp: {
-          ...prev.whatsapp,
-          connectionStatus: "connected",
-          phoneNumber: prev.whatsapp.phoneNumber ?? MOCK_PHONE_NUMBER,
-          connectedAt: new Date().toISOString(),
-        },
-      }));
-    }, 1500);
-    timers.current.push(timer);
-  }, [setSettings]);
+  const refresh = useCallback(async () => {
+    try {
+      const fresh = await api.agent.get();
+      setSettings(fresh);
+    } catch (err) {
+      console.error("Falha ao carregar configuracoes do agente:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      void refresh();
+    } else {
+      setSettings(INITIAL_SETTINGS);
+    }
+    return () => {
+      if (pollRef.current) window.clearTimeout(pollRef.current);
+    };
+  }, [isAuthenticated, refresh]);
+
+  // Atualiza o estado local de forma otimista e reconcilia com o servidor.
+  const optimistic = useCallback(
+    (
+      updater: (prev: AgentSettings) => AgentSettings,
+      apiCall: () => Promise<AgentSettings>
+    ) => {
+      setSettings(updater);
+      apiCall()
+        .then((server) => setSettings(server))
+        .catch((err) => {
+          console.error("Falha ao salvar configuracao:", err);
+          void refresh();
+        });
+    },
+    [refresh]
+  );
+
+  // --- WhatsApp: polling do status durante connecting/reconnecting ---
+  const pollWhatsAppStatus = useCallback((attempt = 0) => {
+    if (attempt > 15) return;
+    pollRef.current = window.setTimeout(async () => {
+      try {
+        const status = await api.agent.whatsappStatus();
+        setSettings((prev) => ({
+          ...prev,
+          whatsapp: {
+            ...prev.whatsapp,
+            connectionStatus:
+              status.connectionStatus as AgentSettings["whatsapp"]["connectionStatus"],
+            phoneNumber: status.phoneNumber ?? prev.whatsapp.phoneNumber,
+            connectedAt: status.connectedAt ?? prev.whatsapp.connectedAt,
+          },
+        }));
+        if (
+          status.connectionStatus === "connecting" ||
+          status.connectionStatus === "reconnecting"
+        ) {
+          pollWhatsAppStatus(attempt + 1);
+        }
+      } catch (err) {
+        console.error("Falha ao consultar status do WhatsApp:", err);
+      }
+    }, 800);
+  }, []);
 
   const toggleWhatsApp = useCallback(
     (enabled: boolean) => {
       if (enabled) {
         setSettings((prev) => ({
           ...prev,
-          whatsapp: {
-            ...prev.whatsapp,
-            enabled: true,
-            connectionStatus: "connecting",
-          },
+          whatsapp: { ...prev.whatsapp, enabled: true, connectionStatus: "connecting" },
         }));
-        runConnectingFlow();
+        api.agent
+          .whatsappConnect()
+          .then(() => pollWhatsAppStatus())
+          .catch((err) => {
+            console.error("Falha ao conectar WhatsApp:", err);
+            void refresh();
+          });
       } else {
         setSettings((prev) => ({
           ...prev,
@@ -82,9 +134,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             connectionStatus: "disconnected",
           },
         }));
+        api.agent.whatsappDisconnect().catch((err) => {
+          console.error("Falha ao desconectar WhatsApp:", err);
+          void refresh();
+        });
       }
     },
-    [setSettings, runConnectingFlow]
+    [pollWhatsAppStatus, refresh]
   );
 
   const reconnectWhatsApp = useCallback(() => {
@@ -92,78 +148,93 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       ...prev,
       whatsapp: { ...prev.whatsapp, connectionStatus: "reconnecting" },
     }));
-    const timer = window.setTimeout(() => {
-      setSettings((prev) => ({
-        ...prev,
-        whatsapp: {
-          ...prev.whatsapp,
-          connectionStatus: "connected",
-          connectedAt: new Date().toISOString(),
-        },
-      }));
-    }, 1500);
-    timers.current.push(timer);
-  }, [setSettings]);
+    api.agent
+      .whatsappReconnect()
+      .then(() => pollWhatsAppStatus())
+      .catch((err) => {
+        console.error("Falha ao reconectar WhatsApp:", err);
+        void refresh();
+      });
+  }, [pollWhatsAppStatus, refresh]);
 
   const togglePersonalUse = useCallback(
     (enabled: boolean) => {
-      setSettings((prev) => ({
-        ...prev,
-        personalUse: { ...prev.personalUse, enabled },
-      }));
+      optimistic(
+        (prev) => ({ ...prev, personalUse: { ...prev.personalUse, enabled } }),
+        () => api.agent.updateChannel("personalUse", { enabled })
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const updateAgentProfile = useCallback(
     (patch: Partial<AgentProfile>) => {
-      setSettings((prev) => ({ ...prev, agent: { ...prev.agent, ...patch } }));
+      optimistic(
+        (prev) => ({ ...prev, agent: { ...prev.agent, ...patch } }),
+        () => api.agent.updateProfile(patch)
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const updateBasePersonality = useCallback(
     (patch: Partial<AgentPersonality>) => {
-      setSettings((prev) => ({
-        ...prev,
-        basePersonality: { ...prev.basePersonality, ...patch },
-      }));
+      setSettings((prev) => {
+        const merged = { ...prev.basePersonality, ...patch };
+        api.agent
+          .updateBasePersonality(merged)
+          .then((server) => setSettings(server))
+          .catch((err) => {
+            console.error("Falha ao salvar personalidade:", err);
+            void refresh();
+          });
+        return { ...prev, basePersonality: merged };
+      });
     },
-    [setSettings]
+    [refresh]
   );
 
   const setBasePersonality = useCallback(
     (personality: AgentPersonality) => {
-      setSettings((prev) => ({ ...prev, basePersonality: personality }));
+      optimistic(
+        (prev) => ({ ...prev, basePersonality: personality }),
+        () => api.agent.updateBasePersonality(personality)
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const updateBaseInstructions = useCallback(
     (instructions: string) => {
-      setSettings((prev) => ({ ...prev, baseInstructions: instructions }));
+      optimistic(
+        (prev) => ({ ...prev, baseInstructions: instructions }),
+        () => api.agent.updateBaseInstructions(instructions)
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const updateChannelConfig = useCallback(
     (channelId: ChannelId, patch: Partial<ChannelConfigBase>) => {
-      setSettings((prev) => ({
-        ...prev,
-        [channelId]: { ...prev[channelId], ...patch },
-      }));
+      optimistic(
+        (prev) => ({ ...prev, [channelId]: { ...prev[channelId], ...patch } }),
+        () => api.agent.updateChannel(channelId, patch)
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const setChannelPersonality = useCallback(
     (channelId: ChannelId, personality: AgentPersonality) => {
-      setSettings((prev) => ({
-        ...prev,
-        [channelId]: { ...prev[channelId], personality },
-      }));
+      optimistic(
+        (prev) => ({
+          ...prev,
+          [channelId]: { ...prev[channelId], personality },
+        }),
+        () => api.agent.updateChannel(channelId, { personality })
+      );
     },
-    [setSettings]
+    [optimistic]
   );
 
   const value = useMemo<SettingsContextValue>(

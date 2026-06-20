@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalendarClock, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,25 +15,42 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { DEMO_SUBSCRIPTION, PLANS } from "@/mocks/subscription";
+import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import type { PlanId } from "@/types";
+import type { PlanId, Subscription } from "@/types";
 
 export function SubscriptionPage() {
-  const [subscription, setSubscription] = useState(DEMO_SUBSCRIPTION);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  function handleSelectPlan(planId: PlanId) {
-    const plan = PLANS.find((p) => p.id === planId);
-    if (!plan) return;
-    setSubscription((prev) => ({
-      ...prev,
-      plan: plan.id,
-      planName: plan.name,
-      price: plan.price,
-    }));
-    setModalOpen(false);
-    toast.success(`Plano alterado para ${plan.name}.`);
+  useEffect(() => {
+    api.subscription
+      .get()
+      .then(setSubscription)
+      .catch((err) => console.error("Falha ao carregar assinatura:", err));
+  }, []);
+
+  async function handleSelectPlan(planId: PlanId) {
+    try {
+      const updated = await api.subscription.update(planId);
+      setSubscription(updated);
+      setModalOpen(false);
+      toast.success(`Plano alterado para ${updated.planName}.`);
+    } catch {
+      toast.error("Não foi possível alterar o plano. Tente novamente.");
+    }
+  }
+
+  if (!subscription) {
+    return (
+      <PageContainer>
+        <PageHeader
+          title="Assinatura"
+          description="Acompanhe seu plano e o uso da plataforma."
+        />
+        <p className="text-sm text-muted-foreground">Carregando...</p>
+      </PageContainer>
+    );
   }
 
   return (

@@ -27,8 +27,8 @@ export function ConversationList() {
     );
   }, [conversations, query]);
 
-  function handleNew() {
-    const id = createConversation();
+  async function handleNew() {
+    const id = await createConversation();
     navigate(`${ROUTES.chat}/${id}`);
   }
 

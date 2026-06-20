@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { FileText, MessageCircle, MessagesSquare, Sparkles } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -5,13 +6,24 @@ import { ConnectionStatusBadge } from "@/components/shared/connection-status-bad
 import { useChat } from "@/contexts/chat-context";
 import { useKnowledgeBase } from "@/contexts/knowledge-base-context";
 import { useSettings } from "@/contexts/settings-context";
-import { DEMO_SUBSCRIPTION } from "@/mocks/subscription";
+import { api } from "@/lib/api";
+import type { UsageLimit } from "@/types";
 
 export function QuickStats() {
   const { settings } = useSettings();
   const { conversations } = useChat();
   const { summary } = useKnowledgeBase();
-  const { whatsappMessages } = DEMO_SUBSCRIPTION.limits;
+  const [whatsappMessages, setWhatsappMessages] = useState<UsageLimit>({
+    used: 0,
+    max: 0,
+  });
+
+  useEffect(() => {
+    api.subscription
+      .get()
+      .then((sub) => setWhatsappMessages(sub.limits.whatsappMessages))
+      .catch((err) => console.error("Falha ao carregar uso:", err));
+  }, []);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

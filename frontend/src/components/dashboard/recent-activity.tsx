@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Database,
   MessageCircle,
@@ -8,9 +9,9 @@ import {
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MOCK_ACTIVITIES } from "@/mocks/activity";
+import { api } from "@/lib/api";
 import { formatRelativeDate } from "@/lib/utils";
-import type { ActivityType } from "@/types";
+import type { Activity, ActivityType } from "@/types";
 
 const ICONS: Record<ActivityType, LucideIcon> = {
   whatsapp: MessageCircle,
@@ -21,6 +22,15 @@ const ICONS: Record<ActivityType, LucideIcon> = {
 };
 
 export function RecentActivity() {
+  const [activities, setActivities] = useState<Activity[]>([]);
+
+  useEffect(() => {
+    api.activities
+      .list()
+      .then(setActivities)
+      .catch((err) => console.error("Falha ao carregar atividades:", err));
+  }, []);
+
   return (
     <Card>
       <CardHeader>
@@ -28,7 +38,7 @@ export function RecentActivity() {
       </CardHeader>
       <CardContent>
         <ul className="space-y-1">
-          {MOCK_ACTIVITIES.map((activity) => {
+          {activities.map((activity) => {
             const Icon = ICONS[activity.type];
             return (
               <li

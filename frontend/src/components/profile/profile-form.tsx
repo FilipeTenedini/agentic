@@ -38,10 +38,14 @@ export function ProfileForm() {
 
   async function onSubmit(values: ProfileValues) {
     setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    updateProfile({ name: values.name, avatarUrl });
-    setLoading(false);
-    toast.success("Perfil atualizado com sucesso!");
+    try {
+      await updateProfile({ name: values.name, avatarUrl });
+      toast.success("Perfil atualizado com sucesso!");
+    } catch {
+      toast.error("Não foi possível atualizar o perfil. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

@@ -2,6 +2,8 @@ export const APP_NAME = "FlowAssist";
 
 export const STORAGE_KEYS = {
   auth: "flowassist_auth",
+  // Token JWT retornado pelo backend (enviado em Authorization: Bearer).
+  token: "flowassist_token",
   // v2: o shape de AgentSettings mudou (personalidade, base de conhecimento e
   // configuração por canal). Subir a versão evita que dados antigos quebrem a UI.
   settings: "flowassist_settings_v2",
@@ -10,6 +12,11 @@ export const STORAGE_KEYS = {
   theme: "flowassist_theme",
   onboarding: "flowassist_onboarding",
 } as const;
+
+/** Base da API do backend (Vite env). Default aponta para o backend local. */
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  "http://localhost:3000";
 
 export const DEMO_CREDENTIALS = {
   email: "demo@flowassist.com",

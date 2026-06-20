@@ -1,0 +1,19 @@
+# PostgreSQL com a extensao pgvector ja embutida.
+# A imagem pgvector/pgvector inclui o binario da extensao; o backend roda
+# `CREATE EXTENSION IF NOT EXISTS vector;` na inicializacao (ver infra/prisma.ts).
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: flowassist-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flowassist
+      POSTGRES_PASSWORD: flowassist
+      POSTGRES_DB: flowassist
+    ports:
+      - "5434:5432"
+    volumes:
+      - flowassist_pgdata:/var/lib/postgresql/data
+
+volumes:
+  flowassist_pgdata:

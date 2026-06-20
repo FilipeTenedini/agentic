@@ -22,8 +22,8 @@ export function ChatPage() {
 
   const conversation = conversations.find((c) => c.id === conversationId);
 
-  function handleNew() {
-    const id = createConversation();
+  async function handleNew() {
+    const id = await createConversation();
     navigate(`${ROUTES.chat}/${id}`);
   }
 

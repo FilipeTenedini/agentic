@@ -1,8 +1,15 @@
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  type ReactNode,
+} from "react";
 
 import { useLocalStorage } from "@/hooks/use-local-storage";
-import { DEMO_CREDENTIALS, STORAGE_KEYS } from "@/lib/constants";
-import { createMockUser, DEMO_USER } from "@/mocks/users";
+import { STORAGE_KEYS } from "@/lib/constants";
+import { api, ApiError, clearToken, getToken, setToken } from "@/lib/api";
 import type { User } from "@/types";
 
 interface AuthResult {
@@ -16,53 +23,79 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<AuthResult>;
   register: (name: string, email: string, password: string) => Promise<AuthResult>;
   logout: () => void;
-  updateProfile: (data: Partial<Pick<User, "name" | "avatarUrl">>) => void;
+  updateProfile: (data: Partial<Pick<User, "name" | "avatarUrl">>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // O usuario fica em cache no localStorage para evitar "flash" de logout no
+  // primeiro render; o token JWT e a fonte da verdade da sessao.
   const [user, setUser] = useLocalStorage<User | null>(STORAGE_KEYS.auth, null);
+
+  // Ao montar, se ha token, revalida a sessao com o backend.
+  useEffect(() => {
+    if (!getToken()) {
+      if (user) setUser(null);
+      return;
+    }
+    api.auth
+      .me()
+      .then((fresh) => setUser(fresh))
+      .catch(() => {
+        clearToken();
+        setUser(null);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string): Promise<AuthResult> => {
-      await delay(700);
-      const normalized = email.trim().toLowerCase();
-      if (
-        normalized === DEMO_CREDENTIALS.email &&
-        password === DEMO_CREDENTIALS.password
-      ) {
-        setUser(DEMO_USER);
+      try {
+        const { token, user: loggedUser } = await api.auth.login(email, password);
+        setToken(token);
+        setUser(loggedUser);
         return { ok: true };
+      } catch (err) {
+        const message =
+          err instanceof ApiError ? err.message : "Falha ao entrar. Tente novamente.";
+        return { ok: false, error: message };
       }
-      // MVP mock: aceita qualquer email válido com senha >= 8 como nova conta
-      if (normalized.includes("@") && password.length >= 8) {
-        setUser(createMockUser(normalized.split("@")[0], normalized));
-        return { ok: true };
-      }
-      return { ok: false, error: "Email ou senha inválidos." };
     },
     [setUser]
   );
 
   const register = useCallback(
-    async (name: string, email: string, _password: string): Promise<AuthResult> => {
-      await delay(800);
-      setUser(createMockUser(name.trim(), email.trim().toLowerCase()));
-      return { ok: true };
+    async (name: string, email: string, password: string): Promise<AuthResult> => {
+      try {
+        const { token, user: newUser } = await api.auth.register(
+          name,
+          email,
+          password
+        );
+        setToken(token);
+        setUser(newUser);
+        return { ok: true };
+      } catch (err) {
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : "Falha ao criar a conta. Tente novamente.";
+        return { ok: false, error: message };
+      }
     },
     [setUser]
   );
 
   const logout = useCallback(() => {
+    clearToken();
     setUser(null);
   }, [setUser]);
 
   const updateProfile = useCallback(
-    (data: Partial<Pick<User, "name" | "avatarUrl">>) => {
-      setUser((prev) => (prev ? { ...prev, ...data } : prev));
+    async (data: Partial<Pick<User, "name" | "avatarUrl">>) => {
+      const updated = await api.auth.updateProfile(data);
+      setUser(updated);
     },
     [setUser]
   );

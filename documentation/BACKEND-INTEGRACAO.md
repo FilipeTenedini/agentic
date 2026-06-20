@@ -1,916 +1,996 @@
-# FlowAssist — Backend & Integração N8N
+# FlowAssist — Integração N8N
 
-> Documento técnico escrito para o desenvolvedor backend (pode ser júnior). Aqui está **tudo** que precisa ser construído no servidor, no N8N e no banco de dados para que a plataforma funcione de verdade. Leia do começo ao fim antes de codar qualquer coisa.
+> Este documento descreve **exclusivamente o que precisa existir dentro do N8N** para a plataforma FlowAssist funcionar em produção. Não explica o backend — apenas os workflows, contratos, endpoints consumidos e pontos de gancho para sair do mock mode.
+>
+> **Público-alvo:** equipe que implementará os workflows N8N sem precisar ler o código-fonte do backend.
 
 ---
 
 ## Sumário
 
-1. [Visão geral do sistema](#1-visão-geral-do-sistema)
-2. [Stack recomendada](#2-stack-recomendada)
-3. [Banco de dados](#3-banco-de-dados)
-4. [Módulos do backend](#4-módulos-do-backend)
-   - [4.1 Autenticação](#41-autenticação)
-   - [4.2 Agentes e configuração](#42-agentes-e-configuração)
-   - [4.3 Base de Conhecimento (RAG)](#43-base-de-conhecimento-rag)
-   - [4.4 Conversas (Chat Interno)](#44-conversas-chat-interno)
-   - [4.5 WhatsApp](#45-whatsapp)
-   - [4.6 Assinaturas e planos](#46-assinaturas-e-planos)
-5. [API REST — Endpoints necessários](#5-api-rest--endpoints-necessários)
-6. [Integração com N8N](#6-integração-com-n8n)
-   - [6.1 Papel do N8N no sistema](#61-papel-do-n8n-no-sistema)
-   - [6.2 Workflows necessários](#62-workflows-necessários)
-   - [6.3 O que o N8N precisa expor para o frontend/backend](#63-o-que-o-n8n-precisa-expor-para-o-frontenbackend)
-7. [Como o frontend se conecta ao backend](#7-como-o-frontend-se-conecta-ao-backend)
-8. [Como o frontend se conecta ao N8N](#8-como-o-frontend-se-conecta-ao-n8n)
-9. [Segurança](#9-segurança)
+1. [Visão geral](#1-visão-geral)
+2. [Autenticação entre serviços](#2-autenticação-entre-serviços)
+3. [Feature flags e mock mode](#3-feature-flags-e-mock-mode)
+4. [Fluxos](#4-fluxos)
+   - [4.1 Chat interno (uso pessoal)](#41-chat-interno-uso-pessoal)
+   - [4.2 WhatsApp](#42-whatsapp)
+   - [4.3 Consulta ao conhecimento](#43-consulta-ao-conhecimento)
+   - [4.4 Recuperação de contexto](#44-recuperação-de-contexto)
+   - [4.5 RAG (vetorização e busca)](#45-rag-vetorização-e-busca)
+   - [4.6 Upload de arquivos](#46-upload-de-arquivos)
+   - [4.7 Processamento de arquivos](#47-processamento-de-arquivos)
+5. [Workflows do N8N](#5-workflows-do-n8n)
+6. [Endpoints consumidos pelo N8N](#6-endpoints-consumidos-pelo-n8n)
+7. [Webhooks expostos pelo N8N (chamados pelo backend)](#7-webhooks-expostos-pelo-n8n-chamados-pelo-backend)
+8. [Contratos de dados](#8-contratos-de-dados)
+9. [Mapa de ganchos no código do backend](#9-mapa-de-ganchos-no-código-do-backend)
 10. [Variáveis de ambiente](#10-variáveis-de-ambiente)
-11. [Ordem de implementação sugerida](#11-ordem-de-implementação-sugerida)
+11. [Roadmap futuro](#11-roadmap-futuro)
 
 ---
 
-## 1. Visão geral do sistema
+## 1. Visão geral
 
-O FlowAssist é composto por **três partes** que precisam conversar entre si:
+O FlowAssist é composto por três camadas:
 
 ```
-┌───────────────────────┐
-│   Frontend (React)    │  ← O que o usuário vê no navegador
-│   (já implementado)   │
-└──────────┬────────────┘
-           │  HTTP/REST + WebSocket
-           ▼
-┌───────────────────────┐
-│   Backend (API)       │  ← Você vai construir isso aqui
-│   Autenticação        │
-│   Dados dos agentes   │
-│   Arquivos/RAG        │
-│   Webhooks            │
-└──────────┬────────────┘
-           │  HTTP (webhooks + chamadas)
-           ▼
-┌───────────────────────┐
-│   N8N                 │  ← Motor de automação dos agentes
-│   Workflows           │
-│   Chamadas ao LLM     │
-│   Integração WhatsApp │
-└───────────────────────┘
+┌─────────────────────┐
+│  Frontend (React)   │  Interface do usuário
+└─────────┬───────────┘
+          │  HTTP REST + JWT
+          ▼
+┌─────────────────────┐
+│  Backend (API)      │  Dados, autenticação, orquestração
+└─────────┬───────────┘
+          │  HTTP webhooks (ida e volta)
+          ▼
+┌─────────────────────┐
+│  N8N                │  Orquestração de IA, RAG, WhatsApp
+└─────────┬───────────┘
+          │
+    ┌─────┴─────┬──────────────┐
+    ▼           ▼              ▼
+  LLM      Evolution API    Storage
+(OpenAI,   (WhatsApp)      (arquivos)
+Anthropic,
+ Gemini)
 ```
 
-**Resumindo o fluxo de uma mensagem de WhatsApp:**
+### Papel do N8N
 
-1. Cliente manda mensagem no WhatsApp.
-2. WhatsApp entrega a mensagem para o N8N via webhook.
-3. N8N busca as configurações do agente no Backend.
-4. N8N busca contexto relevante na Base de Conhecimento (RAG).
-5. N8N monta o prompt e chama o LLM (ex.: OpenAI, Groq, etc.).
-6. N8N responde automaticamente ao cliente no WhatsApp.
-7. N8N registra a conversa no Backend.
+O N8N é o **motor de inteligência** da plataforma. Ele:
 
-**Resumindo o fluxo de uma mensagem no chat interno (Uso Pessoal):**
+- Recebe mensagens (chat interno e WhatsApp) e gera respostas via LLM.
+- Processa arquivos da base de conhecimento (extração, chunking, embeddings).
+- Executa busca semântica (RAG) quando necessário.
+- Traduz eventos da Evolution API em status de conexão WhatsApp.
+- Persiste histórico de conversas WhatsApp no backend.
 
-1. Usuário digita no chat do FlowAssist.
-2. Frontend envia a mensagem para o Backend.
-3. Backend encaminha para o N8N via HTTP.
-4. N8N busca configurações e contexto, chama LLM, retorna resposta.
-5. Backend salva a mensagem e retorna para o Frontend.
+O backend **não chama LLM diretamente** em produção — delega ao N8N via webhooks. O backend **não processa arquivos** em produção — dispara o workflow de processamento no N8N.
+
+### Direção das chamadas
+
+| Direção | Quem inicia | Protocolo | Autenticação |
+| --- | --- | --- | --- |
+| Backend → N8N | Backend | `POST {N8N_URL}/webhook/{path}` | Header `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
+| N8N → Backend | N8N | `PUT/POST {API_URL}/api/...` | Header `x-webhook-secret: {WEBHOOK_SECRET}` |
+| Evolution → N8N | Evolution API | Webhook configurado no N8N | Conforme Evolution |
+| Evolution → Backend | Evolution API (opcional) | `POST {API_URL}/api/webhooks/evolution` | Header `x-webhook-secret: {WEBHOOK_SECRET}` |
 
 ---
 
-## 2. Stack recomendada
+## 2. Autenticação entre serviços
 
-> Não é obrigatório usar exatamente essa stack, mas é o que melhor se encaixa com o frontend React já existente e com o N8N.
+### N8N → Backend (callbacks)
 
-| Camada | Tecnologia sugerida | Por quê |
+Todas as rotas de callback do backend exigem:
+
+```
+x-webhook-secret: {WEBHOOK_SECRET}
+```
+
+Rotas protegidas:
+- `PUT /api/knowledge/files/:fileId`
+- `POST /api/knowledge/files/:fileId/chunks`
+- `POST /api/conversations/internal`
+- `PUT /api/webhooks/whatsapp-status`
+- `POST /api/webhooks/evolution`
+
+### Backend → N8N (disparo de workflows)
+
+O backend envia em todas as chamadas:
+
+```
+x-webhook-secret: {N8N_WEBHOOK_SECRET}
+```
+
+O N8N deve validar esse header nos webhooks de entrada.
+
+---
+
+## 3. Feature flags e mock mode
+
+O backend roda standalone por padrão com três flags:
+
+| Flag | Default | Quando `true` | Quando `false` |
+| --- | --- | --- | --- |
+| `MOCK_AI` | `true` | Respostas simuladas no chat interno | Chama webhook `personal-use-chat` do N8N |
+| `MOCK_RAG` | `true` | Processamento de arquivos simulado com timers | Dispara webhook `knowledge-file-processing` do N8N |
+| `MOCK_WHATSAPP` | `true` | Conexão WhatsApp simulada | Chama Evolution API real |
+
+**Para ativar o N8N em produção**, defina as três flags como `false` e configure as URLs/secrets correspondentes.
+
+---
+
+## 4. Fluxos
+
+### 4.1 Chat interno (uso pessoal)
+
+Canal: `personalUse`. O usuário conversa com o agente pela interface web.
+
+```
+1. Usuário digita mensagem no frontend
+2. Frontend → POST /api/conversations/:id/messages { content }
+3. Backend salva mensagem do usuário no banco
+4. Backend monta o system prompt (instruções + personalidade + RAG)
+5. Backend recupera histórico recente (últimas 12 mensagens)
+6. [MOCK_AI=false] Backend → POST {N8N}/webhook/personal-use-chat
+7. N8N Workflow 05 executa LLM com system prompt + histórico + mensagem
+8. N8N retorna { reply: "..." }
+9. Backend salva resposta do assistente
+10. Backend → { userMessage, assistantMessage } para o frontend
+```
+
+**Personalidade e instruções:** o backend já resolve a herança por canal antes de chamar o N8N. O payload inclui o `systemPrompt` montado e a `personality` resolvida.
+
+**Base de conhecimento:** se `useSharedKnowledgeBase=true` no canal `personalUse`, o backend faz busca textual (mock) ou vetorial (produção) e inclui o contexto em `knowledgeContext`.
+
+### 4.2 WhatsApp
+
+Canal: `whatsapp`. Mensagens chegam via Evolution API, não pelo frontend.
+
+```
+1. Cliente envia mensagem no WhatsApp
+2. Evolution API → webhook do N8N (Workflow 01)
+3. N8N identifica a instância → agentId
+4. N8N busca configuração do agente/canal (Workflow 02)
+5. N8N resolve personalidade e instruções do canal whatsapp (Workflow 03)
+6. N8N busca conhecimento relevante (Workflow 04) se useSharedKnowledgeBase=true
+7. N8N recupera histórico da conversa (Workflow 06 — contexto)
+8. N8N executa LLM (Workflow 05)
+9. N8N envia resposta via Evolution API
+10. N8N → POST /api/conversations/internal (salva histórico no backend)
+11. Backend atualiza contadores de uso (whatsappMsgsUsed)
+```
+
+**Conexão WhatsApp (QR code):**
+
+```
+1. Usuário clica "Conectar" no frontend
+2. Frontend → POST /api/agent/whatsapp/connect
+3. Backend cria instância na Evolution API (instanceName = flowassist-{agentId8chars})
+4. Backend salva status "connecting" + qrCode
+5. Evolution emite eventos de QR/conexão → N8N (Workflow 08)
+6. N8N normaliza evento → PUT /api/webhooks/whatsapp-status
+7. Backend atualiza connectionStatus, phoneNumber, connectedAt
+8. Frontend faz polling em GET /api/agent/whatsapp/status
+```
+
+### 4.3 Consulta ao conhecimento
+
+Usada durante a geração de respostas (chat e WhatsApp).
+
+```
+1. N8N recebe a mensagem do usuário (query)
+2. N8N precisa do agentId e saber se o canal usa base compartilhada
+3. N8N → POST /api/knowledge/search { query, topK }
+   (requer JWT do usuário OU endpoint interno com webhook secret — ver nota)
+4. Backend retorna trechos relevantes com score
+5. N8N injeta trechos no prompt do LLM
+```
+
+> **Nota de implementação:** o endpoint `POST /api/knowledge/search` hoje exige JWT do usuário. Para workflows N8N (sem sessão de usuário), duas opções:
+> - **Recomendado:** o N8N chama a busca passando `agentId` em um endpoint interno futuro (`POST /api/internal/knowledge/search` com webhook secret).
+> - **Alternativa:** o backend já inclui `knowledgeContext` no payload do webhook `personal-use-chat`. Para WhatsApp, o Workflow 04 deve implementar a busca diretamente no banco vetorial ou chamar um endpoint interno.
+
+### 4.4 Recuperação de contexto
+
+Histórico de conversa para manter coerência nas respostas.
+
+**Chat interno:** o backend envia as últimas 12 mensagens no campo `history` do webhook `personal-use-chat`.
+
+**WhatsApp:** o N8N deve:
+
+```
+1. Localizar conversa existente por externalId (número do contato + agentId)
+2. Se não existir, criar nova conversa via POST /api/conversations/internal
+3. Buscar mensagens anteriores (futuro: GET /api/internal/conversations/:id/messages)
+4. Incluir histórico no prompt do LLM (últimas N mensagens)
+```
+
+Hoje o N8N pode manter contexto em memória/Redis por `externalId` ou consultar o backend via endpoint interno a ser exposto.
+
+### 4.5 RAG (vetorização e busca)
+
+Pipeline completo de Retrieval-Augmented Generation:
+
+```
+Upload (frontend)
+  → Backend salva arquivo no storage
+  → Backend dispara N8N webhook "knowledge-file-processing"
+  → N8N baixa arquivo do storageUrl
+  → N8N extrai texto (PDF/DOCX/XLSX/CSV/TXT/imagem OCR)
+  → N8N divide em chunks (500-1000 tokens, overlap 10%)
+  → N8N gera embeddings (OpenAI text-embedding-3-small, 1536 dims)
+  → N8N → POST /api/knowledge/files/:id/chunks { chunks: [...] }
+  → N8N → PUT /api/knowledge/files/:id { status: "ready", chunks, vectors, indexedAt }
+  → Frontend reflete status via polling
+```
+
+**Busca semântica em produção:**
+
+```sql
+-- Exemplo de query vetorial (pgvector, cosine distance)
+SELECT content, file_id, chunk_index,
+       1 - (embedding <=> $1::vector) AS score
+FROM knowledge_chunks
+WHERE agent_id = $2
+ORDER BY embedding <=> $1::vector
+LIMIT $3;
+```
+
+### 4.6 Upload de arquivos
+
+O upload é feito **diretamente pelo frontend ao backend** (multipart). O N8N **não participa** do upload.
+
+```
+1. Frontend → POST /api/knowledge/files (multipart, campo "file")
+2. Backend valida tamanho (MAX_UPLOAD_BYTES, default 20MB)
+3. Backend salva em storage local (ou S3 futuro) → storageUrl
+4. Backend cria registro com status "uploading"
+5. Backend dispara processamento (mock ou N8N)
+```
+
+Formatos suportados (preparados no schema, processamento futuro no N8N):
+
+| Extensão | type no banco | Extração sugerida no N8N |
 | --- | --- | --- |
-| Linguagem | **Node.js + TypeScript** | Mesma linguagem do frontend, menos curva de aprendizado |
-| Framework HTTP | **Fastify** ou **Express** | Simples, bem documentado, fácil de escalar |
-| Banco de dados principal | **PostgreSQL** | Confiável, suporta JSON, tem bom suporte a busca vetorial (pgvector) |
-| ORM | **Prisma** | Tipagem automática, migrations fáceis |
-| Armazenamento de arquivos | **Supabase Storage** ou **AWS S3** | Guardar PDFs e arquivos da base de conhecimento |
-| Autenticação | **JWT** (JSON Web Tokens) | Stateless, fácil de integrar com frontend |
-| Embeddings/Vetores | **pgvector** (extensão do PostgreSQL) | Armazenar e buscar vetores de texto para o RAG |
-| Modelo de linguagem | **OpenAI API** (GPT-4o / GPT-4o-mini) ou **Groq** | LLM chamado pelo N8N |
-| WhatsApp | **Evolution API** | API open-source para WhatsApp, funciona muito bem com N8N |
-| Motor de automação | **N8N** (self-hosted) | Orquestra tudo sem precisar de código extra |
-| Cache/filas | **Redis** (opcional, fase 2) | Para filas de processamento de arquivos volumosos |
+| `.pdf` | `pdf` | pdf-parse / PyMuPDF |
+| `.docx` | `docx` | mammoth / python-docx |
+| `.xlsx` | `xlsx` | xlsx / openpyxl |
+| `.csv` | `csv` | parsing direto |
+| `.txt` | `txt` | leitura direta |
+| `.png/.jpg` | `image` | OCR (Tesseract / Vision API) |
+| outros | `other` | tentativa genérica ou erro |
+
+### 4.7 Processamento de arquivos
+
+Detalhamento do Workflow 07:
+
+```
+Entrada: { fileId, agentId, storageUrl, fileType }
+
+Passo 1 — Atualizar status
+  PUT /api/knowledge/files/:fileId
+  { "status": "processing", "progress": 0 }
+
+Passo 2 — Baixar arquivo
+  GET {storageUrl} (arquivo local ou URL assinada S3)
+
+Passo 3 — Extrair texto conforme fileType
+
+Passo 4 — Chunking
+  Dividir em trechos de ~800 tokens com overlap de 80 tokens
+  Atualizar progresso periodicamente:
+  PUT /api/knowledge/files/:fileId { "progress": 45 }
+
+Passo 5 — Gerar embeddings
+  Para cada chunk: chamar API de embedding (OpenAI, etc.)
+  Atualizar progresso: { "progress": 80 }
+
+Passo 6 — Salvar chunks
+  POST /api/knowledge/files/:fileId/chunks
+  { "chunks": [{ "content": "...", "chunkIndex": 0, "embedding": [0.1, ...] }] }
+
+Passo 7 — Finalizar
+  PUT /api/knowledge/files/:fileId
+  {
+    "status": "ready",
+    "chunks": 42,
+    "vectors": 42,
+    "indexedAt": "2025-06-19T12:00:00.000Z"
+  }
+
+Em caso de erro:
+  PUT /api/knowledge/files/:fileId
+  { "status": "error", "errorMessage": "Descrição do erro" }
+```
 
 ---
 
-## 3. Banco de dados
+## 5. Workflows do N8N
 
-Abaixo estão **todas as tabelas** que o banco de dados precisa ter. Pensa assim: cada tabela é uma gaveta onde a gente guarda um tipo de coisa.
+### Workflow 01 — Receber mensagem WhatsApp
 
-### Tabela: `users` (usuários)
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Webhook da Evolution API (`messages.upsert` ou equivalente) |
+| **Entrada** | Payload bruto da Evolution (instance, data.key.remoteJid, data.message.conversation) |
+| **Saída** | Dispara Workflow 02 com `{ agentId, contactPhone, contactName, message, instanceName }` |
 
-```sql
-users
-├── id              UUID PRIMARY KEY
-├── email           TEXT UNIQUE NOT NULL
-├── password_hash   TEXT NOT NULL          -- nunca salvar senha em texto puro
-├── name            TEXT NOT NULL
-├── avatar_url      TEXT
-├── created_at      TIMESTAMP DEFAULT NOW()
-└── updated_at      TIMESTAMP DEFAULT NOW()
-```
+**Nodes sugeridos:**
+1. Webhook (Evolution)
+2. Function — extrair texto da mensagem (suportar texto, áudio transcrito, imagem)
+3. HTTP Request — resolver `agentId` a partir de `instanceName` (consulta interna ou mapa)
+4. Execute Workflow → Workflow 02
 
-### Tabela: `agents` (configuração do agente de cada usuário)
+---
 
-Cada usuário tem **um** agente. O agente tem canais (WhatsApp e Uso Pessoal).
+### Workflow 02 — Buscar agente e configuração
 
-```sql
-agents
-├── id              UUID PRIMARY KEY
-├── user_id         UUID REFERENCES users(id)
-├── name            TEXT NOT NULL            -- nome do agente ("Assistente FlowAssist")
-├── description     TEXT
-├── status          TEXT DEFAULT 'draft'     -- 'draft' | 'active' | 'paused'
-├── base_instructions TEXT                   -- instruções globais em texto livre
-├── created_at      TIMESTAMP DEFAULT NOW()
-└── updated_at      TIMESTAMP DEFAULT NOW()
-```
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Chamado pelo Workflow 01 ou 05 |
+| **Entrada** | `{ agentId, channelId: "whatsapp" \| "personalUse" }` |
+| **Saída** | Configuração completa do agente para o canal |
 
-### Tabela: `channel_configs` (configuração por canal)
-
-Cada agente tem até dois canais: `whatsapp` e `personal_use`.
-
-```sql
-channel_configs
-├── id                   UUID PRIMARY KEY
-├── agent_id             UUID REFERENCES agents(id)
-├── channel_id           TEXT NOT NULL     -- 'whatsapp' | 'personal_use'
-├── enabled              BOOLEAN DEFAULT false
-├── instructions         TEXT DEFAULT ''   -- instruções específicas do canal
-├── personality          JSONB             -- objeto AgentPersonality (ver seção 4.2)
-├── use_shared_knowledge BOOLEAN DEFAULT true
-├── created_at           TIMESTAMP DEFAULT NOW()
-└── updated_at           TIMESTAMP DEFAULT NOW()
-
--- Restrição: um canal por agente
-UNIQUE (agent_id, channel_id)
-```
-
-O campo `personality` é um JSON com essa estrutura:
+**Dados necessários (montar a partir do banco ou cache):**
 
 ```json
 {
-  "temperature": 50,
-  "creativity": 50,
-  "formality": 60,
-  "objectivity": 55,
-  "technicalLevel": 40,
-  "writingStyle": "equilibrado",
-  "emojiUsage": "as_vezes",
-  "responseLength": "media"
+  "agentId": "uuid",
+  "agentName": "Assistente FlowAssist",
+  "baseInstructions": "Você é o assistente...",
+  "basePersonality": { "temperature": 50, "creativity": 50, ... },
+  "channel": {
+    "channelId": "whatsapp",
+    "enabled": true,
+    "useSharedPersonality": false,
+    "useSharedKnowledgeBase": true,
+    "personality": { ... },
+    "instructions": "Seja breve..."
+  }
 }
 ```
 
-### Tabela: `whatsapp_connections` (dados da conexão WhatsApp)
+> Em produção, o N8N pode consultar o PostgreSQL diretamente (tabelas `agents`, `channel_configs`) ou um endpoint interno do backend.
 
-```sql
-whatsapp_connections
-├── id                UUID PRIMARY KEY
-├── agent_id          UUID REFERENCES agents(id) UNIQUE
-├── phone_number      TEXT
-├── instance_name     TEXT                 -- nome da instância na Evolution API
-├── connection_status TEXT DEFAULT 'disconnected'
-           -- 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
-├── connected_at      TIMESTAMP
-├── qr_code           TEXT                 -- QR code em base64 para escanear
-└── updated_at        TIMESTAMP DEFAULT NOW()
+---
+
+### Workflow 03 — Montar personalidade e prompt
+
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Sub-workflow chamado por 01, 05 |
+| **Entrada** | Dados do Workflow 02 + `knowledgeContext` (opcional) |
+| **Saída** | `{ systemPrompt, personality, llmParams }` |
+
+**Lógica de herança:**
+
+```
+SE channel.useSharedPersonality = true
+  ENTÃO personality = basePersonality
+SENÃO
+  personality = channel.personality
+
+systemPrompt =
+  baseInstructions
+  + channel.instructions (se houver)
+  + diretrizes de estilo (traduzir personality em texto)
+  + knowledgeContext (se houver)
 ```
 
-### Tabela: `knowledge_files` (arquivos da base de conhecimento)
+**Mapeamento personality → parâmetros LLM:**
 
-```sql
-knowledge_files
-├── id            UUID PRIMARY KEY
-├── agent_id      UUID REFERENCES agents(id)
-├── name          TEXT NOT NULL
-├── type          TEXT                     -- 'pdf' | 'docx' | 'txt' | 'csv' | 'xlsx' | 'image' | 'other'
-├── size_bytes    INTEGER
-├── status        TEXT DEFAULT 'uploading' -- 'uploading' | 'processing' | 'ready' | 'error'
-├── error_message TEXT
-├── storage_url   TEXT                     -- URL no S3/Supabase Storage
-├── chunks        INTEGER                  -- quantidade de pedaços gerados no RAG
-├── vectors       INTEGER                  -- quantidade de vetores gerados
-├── indexed_at    TIMESTAMP                -- quando ficou pronto para busca
-├── uploaded_at   TIMESTAMP DEFAULT NOW()
-└── updated_at    TIMESTAMP DEFAULT NOW()
+| Campo | Uso no LLM |
+| --- | --- |
+| `temperature` | `temperature` (0-1, dividir por 100) |
+| `creativity` | Influencia `top_p` |
+| `formality` | Diretriz no system prompt |
+| `objectivity` | Diretriz no system prompt |
+| `technicalLevel` | Diretriz no system prompt |
+| `writingStyle` | Diretriz no system prompt |
+| `emojiUsage` | Diretriz no system prompt |
+| `responseLength` | `max_tokens` (curta=256, media=512, longa=1024) |
+
+---
+
+### Workflow 04 — Buscar conhecimento (RAG)
+
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Sub-workflow |
+| **Entrada** | `{ agentId, query, topK: 5, useSharedKnowledgeBase: true }` |
+| **Saída** | `{ hits: [{ content, score, fileId, chunkIndex }] }` |
+
+**Quando executar:** apenas se `useSharedKnowledgeBase=true` no canal.
+
+**Implementação:**
+1. Gerar embedding da `query` (mesmo modelo usado no indexação).
+2. Busca vetorial no PostgreSQL (pgvector) filtrando por `agent_id`.
+3. Retornar top-K trechos ordenados por similaridade.
+
+---
+
+### Workflow 05 — Executar LLM
+
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Webhook `personal-use-chat` (backend) OU sub-workflow (WhatsApp) |
+| **Entrada** | Ver [seção 7.1](#71-personal-use-chat) |
+| **Saída** | `{ reply: "texto da resposta" }` |
+
+**Nodes sugeridos:**
+1. Webhook (path: `personal-use-chat`)
+2. Validar `x-webhook-secret`
+3. Montar messages array: `[{ role: "system", content: systemPrompt }, ...history, { role: "user", content: userMessage }]`
+4. HTTP Request → OpenAI/Anthropic/Gemini
+5. Function — extrair texto da resposta
+6. Respond to Webhook → `{ reply }`
+
+---
+
+### Workflow 06 — Salvar histórico
+
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Após Workflow 05 (WhatsApp) |
+| **Entrada** | `{ agentId, contactPhone, contactName, externalId, userMessage, assistantMessage }` |
+| **Saída** | Conversa persistida no backend |
+
+**Chamada:**
+
 ```
+POST /api/conversations/internal
+x-webhook-secret: {WEBHOOK_SECRET}
 
-### Tabela: `knowledge_chunks` (pedaços de texto para RAG)
-
-Cada arquivo é dividido em pedaços menores. Cada pedaço tem um vetor numérico para busca semântica.
-
-```sql
-knowledge_chunks
-├── id           UUID PRIMARY KEY
-├── file_id      UUID REFERENCES knowledge_files(id)
-├── agent_id     UUID REFERENCES agents(id)
-├── content      TEXT                     -- o texto do trecho
-├── embedding    vector(1536)             -- vetor (requer extensão pgvector)
-├── chunk_index  INTEGER                  -- posição dentro do arquivo
-└── created_at   TIMESTAMP DEFAULT NOW()
-```
-
-> **Nota:** Para usar `vector(1536)`, precisa rodar `CREATE EXTENSION IF NOT EXISTS vector;` no PostgreSQL.
-
-### Tabela: `conversations` (conversas)
-
-```sql
-conversations
-├── id              UUID PRIMARY KEY
-├── agent_id        UUID REFERENCES agents(id)
-├── channel_id      TEXT               -- 'whatsapp' | 'personal_use'
-├── external_id     TEXT               -- ID da conversa no WhatsApp (quando aplicável)
-├── contact_name    TEXT               -- nome do contato (WhatsApp)
-├── contact_phone   TEXT               -- número do contato (WhatsApp)
-├── title           TEXT               -- resumo/título gerado
-├── message_count   INTEGER DEFAULT 0
-├── last_message    TEXT
-├── last_message_at TIMESTAMP
-├── created_at      TIMESTAMP DEFAULT NOW()
-└── updated_at      TIMESTAMP DEFAULT NOW()
-```
-
-### Tabela: `messages` (mensagens dentro de cada conversa)
-
-```sql
-messages
-├── id              UUID PRIMARY KEY
-├── conversation_id UUID REFERENCES conversations(id)
-├── role            TEXT NOT NULL   -- 'user' | 'assistant'
-├── content         TEXT NOT NULL
-├── created_at      TIMESTAMP DEFAULT NOW()
-```
-
-### Tabela: `subscriptions` (assinaturas e planos)
-
-```sql
-subscriptions
-├── id               UUID PRIMARY KEY
-├── user_id          UUID REFERENCES users(id) UNIQUE
-├── plan_id          TEXT DEFAULT 'free'   -- 'free' | 'starter' | 'pro' | 'business'
-├── plan_name        TEXT
-├── price            DECIMAL(10,2)
-├── currency         TEXT DEFAULT 'BRL'
-├── status           TEXT DEFAULT 'active' -- 'active' | 'past_due' | 'canceled'
-├── renewal_date     DATE
-├── whatsapp_msgs_used INTEGER DEFAULT 0
-├── whatsapp_msgs_max  INTEGER DEFAULT 100
-├── chat_msgs_used     INTEGER DEFAULT 0
-├── chat_msgs_max      INTEGER DEFAULT 50
-├── created_at       TIMESTAMP DEFAULT NOW()
-└── updated_at       TIMESTAMP DEFAULT NOW()
+{
+  "agentId": "uuid",
+  "channel": "whatsapp",
+  "externalId": "5511999999999@s.whatsapp.net",
+  "contactName": "João Silva",
+  "contactPhone": "+55 11 99999-9999",
+  "messages": [
+    { "role": "user", "content": "Olá, qual o prazo de entrega?" },
+    { "role": "assistant", "content": "O prazo é de 3 a 5 dias úteis." }
+  ]
+}
 ```
 
 ---
 
-## 4. Módulos do backend
+### Workflow 07 — Processar arquivo (RAG)
 
-### 4.1 Autenticação
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Webhook `knowledge-file-processing` (backend) |
+| **Entrada** | `{ fileId, agentId, storageUrl, fileType }` |
+| **Saída** | Chunks salvos + status `ready` no backend |
 
-**O que precisa existir:**
+Ver fluxo detalhado na [seção 4.7](#47-processamento-de-arquivos).
 
-- **Registro:** o usuário cria uma conta com email + senha.
-- **Login:** o usuário entra com email + senha e recebe um **token JWT**.
-- **Token:** o frontend guarda esse token e manda em todas as requisições no cabeçalho `Authorization: Bearer <token>`.
-- **Verificação:** em cada rota protegida, o backend verifica se o token é válido.
-- **Logout:** o frontend simplesmente descarta o token (não precisa de endpoint, mas pode ter uma lista de tokens inválidos/blacklist para invalidar tokens antes do vencimento).
+---
 
-**Regras:**
-- A senha nunca é salva em texto puro. Usar **bcrypt** para criar um hash.
-- O token JWT deve expirar em 7 dias.
-- O token deve conter: `{ userId, email, iat, exp }`.
+### Workflow 08 — Eventos de conexão WhatsApp
 
-**Endpoints:**
+| Item | Valor |
+| --- | --- |
+| **Trigger** | Webhook da Evolution API (connection.update, qrcode.updated) |
+| **Entrada** | Payload bruto da Evolution |
+| **Saída** | Status atualizado no backend |
+
+**Normalização de eventos:**
+
+| Evento Evolution | connectionStatus |
+| --- | --- |
+| `qrcode.updated` | `connecting` |
+| `connection.open` | `connected` |
+| `connection.close` | `disconnected` |
+| reconexão automática | `reconnecting` |
+
+**Chamada ao backend:**
 
 ```
-POST /auth/register    → cria usuário, retorna token
-POST /auth/login       → valida email+senha, retorna token
-GET  /auth/me          → retorna dados do usuário logado (exige token)
-POST /auth/logout      → (opcional) invalida token
+PUT /api/webhooks/whatsapp-status
+x-webhook-secret: {WEBHOOK_SECRET}
+
+{
+  "instanceName": "flowassist-a1b2c3d4",
+  "connectionStatus": "connected",
+  "phoneNumber": "+55 11 98765-4321",
+  "connectedAt": "2025-06-19T12:00:00.000Z",
+  "qrCode": null
+}
 ```
 
 ---
 
-### 4.2 Agentes e configuração
+## 6. Endpoints consumidos pelo N8N
 
-**O que precisa existir:**
+Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 
-- Cada usuário tem exatamente um agente.
-- Ao se cadastrar, o backend cria automaticamente o agente e os dois registros de canal (`whatsapp` e `personal_use`) com valores padrão.
-- O usuário pode editar as configurações do agente (nome, instruções, personalidade por canal).
+### 6.1 Atualizar status de arquivo
 
-**Regras:**
-- Antes de salvar, validar que os campos obrigatórios estão preenchidos.
-- A `personality` do canal é um JSON livre, mas deve respeitar os campos definidos em `AgentPersonality` (ver seção 3).
-- O campo `instructions` aceita texto longo (sem limite rígido, mas sugerir máximo de 5.000 caracteres na UI).
+| Campo | Valor |
+| --- | --- |
+| **Método** | `PUT` |
+| **URL** | `/api/knowledge/files/:fileId` |
+| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Quando chamar** | Durante e após processamento de arquivo (Workflow 07) |
 
-**Endpoints:**
+**Payload:**
 
-```
-GET  /agent                          → busca o agente do usuário logado
-PUT  /agent                          → atualiza nome, descrição, status, base_instructions
-GET  /agent/channels                 → lista as duas configs de canal (whatsapp + personal_use)
-PUT  /agent/channels/:channelId      → atualiza config de um canal (enabled, instructions, personality)
-GET  /agent/whatsapp/status          → retorna status atual da conexão WhatsApp
-POST /agent/whatsapp/connect         → inicia conexão (cria instância na Evolution API)
-POST /agent/whatsapp/disconnect      → desconecta e remove instância
-GET  /agent/whatsapp/qr              → retorna QR code atual para escanear
-```
-
----
-
-### 4.3 Base de Conhecimento (RAG)
-
-**O que precisa existir:**
-
-- Upload de arquivos (PDF, DOCX, TXT, CSV, XLSX, imagens).
-- Armazenamento do arquivo no S3/Supabase Storage.
-- Processamento assíncrono: após o upload, o arquivo passa por:
-  1. Extração de texto (PDF → texto, DOCX → texto, etc.).
-  2. Divisão em pedaços (chunks) de ~500 tokens.
-  3. Geração de embeddings (vetores numéricos) para cada chunk via API de embeddings (OpenAI `text-embedding-3-small` ou similar).
-  4. Armazenamento dos vetores na tabela `knowledge_chunks`.
-- Busca semântica: dado um texto de pergunta, encontrar os chunks mais parecidos por similaridade vetorial.
-
-**Fluxo de upload:**
-
-```
-Frontend → POST /knowledge/files (multipart/form-data)
-  ↓
-Backend salva arquivo no S3
-  ↓
-Backend cria registro na tabela knowledge_files (status: 'uploading')
-  ↓
-Backend dispara processamento assíncrono (fila ou job)
-  ↓
-  [status: 'processing']
-  ↓
-Extração de texto + chunking + embeddings
-  ↓
-  [status: 'ready'] ou [status: 'error']
-  ↓
-Frontend consulta GET /knowledge/files para ver o status atualizado
+```json
+{
+  "status": "processing",
+  "progress": 45,
+  "errorMessage": null,
+  "chunks": 42,
+  "vectors": 42,
+  "indexedAt": "2025-06-19T12:00:00.000Z"
+}
 ```
 
-> **Nesta fase (MVP):** o processamento pode ser síncrono e simulado (apenas muda o status sem processar de verdade). O importante é ter a estrutura pronta para a integração real depois.
+**Resposta:**
 
-**Endpoints:**
-
-```
-GET    /knowledge/files                → lista todos os arquivos do agente
-POST   /knowledge/files               → faz upload de um arquivo (multipart)
-DELETE /knowledge/files/:fileId       → remove arquivo e seus chunks
-POST   /knowledge/files/:fileId/retry → tenta processar novamente um arquivo com erro
-GET    /knowledge/files/:fileId       → detalhe de um arquivo com status atualizado
-```
-
-**Função de busca semântica (usada pelo N8N):**
-
-```
-POST /knowledge/search
-Body: { "query": "texto da pergunta", "topK": 5 }
-Response: [{ content, score, fileId, chunkIndex }]
-```
-
-> Esta rota é chamada pelo N8N antes de montar o prompt do LLM.
-
----
-
-### 4.4 Conversas (Chat Interno)
-
-**O que precisa existir:**
-
-- O usuário inicia uma conversa no chat interno (canal `personal_use`).
-- O frontend manda a mensagem para o backend.
-- O backend encaminha para o N8N processar e retorna a resposta do assistente.
-- O histórico de mensagens é salvo no banco.
-
-**Endpoints:**
-
-```
-GET  /conversations                   → lista todas as conversas do agente
-POST /conversations                   → cria uma nova conversa
-GET  /conversations/:id               → detalhe da conversa com mensagens
-DELETE /conversations/:id             → exclui uma conversa
-
-POST /conversations/:id/messages      → envia mensagem e recebe resposta do assistente
-```
-
-**O que acontece no `POST /conversations/:id/messages`:**
-
-```
-1. Salva a mensagem do usuário no banco (role: 'user')
-2. Busca o histórico das últimas N mensagens da conversa
-3. Busca a configuração do agente (canal personal_use: personality, instructions)
-4. Faz busca semântica na base de conhecimento (POST /knowledge/search)
-5. Monta o payload e chama o N8N via HTTP
-6. Aguarda a resposta do N8N (resposta do LLM)
-7. Salva a resposta no banco (role: 'assistant')
-8. Retorna a resposta para o frontend
-```
-
-> O passo 5 pode ser feito de duas formas:
-> - **Síncrono:** o backend espera o N8N responder (mais simples, pode demorar).
-> - **WebSocket / SSE:** o N8N responde de forma assíncrona e o frontend recebe em tempo real (melhor UX, mais complexo).
-> Comece com o síncrono.
-
----
-
-### 4.5 WhatsApp
-
-**O que precisa existir:**
-
-- Integração com a **Evolution API** (uma API open-source que controla o WhatsApp Web).
-- O backend gerencia instâncias da Evolution API (uma instância por agente/usuário).
-- O N8N recebe as mensagens do WhatsApp via webhook e processa.
-- O N8N usa o backend para buscar configs e salvar conversas.
-
-**Fluxo de conexão:**
-
-```
-1. Usuário clica "Conectar WhatsApp" no frontend.
-2. Frontend chama POST /agent/whatsapp/connect.
-3. Backend cria uma instância na Evolution API com um nome único.
-4. Evolution API gera um QR Code.
-5. Backend retorna o QR Code para o frontend exibir.
-6. Usuário escaneia o QR Code com o celular.
-7. Evolution API confirma a conexão via webhook no backend.
-8. Backend atualiza connection_status para 'connected'.
-9. Backend registra o webhook da Evolution API no N8N.
-```
-
-**Fluxo de recebimento de mensagem:**
-
-```
-1. Cliente final manda mensagem no WhatsApp do usuário.
-2. Evolution API dispara webhook para o N8N.
-3. N8N identifica o agente pelo número de telefone.
-4. N8N chama GET /agent (no backend) para buscar configs.
-5. N8N chama POST /knowledge/search para buscar contexto.
-6. N8N monta o prompt e chama o LLM.
-7. N8N manda a resposta de volta para o cliente via Evolution API.
-8. N8N chama POST /conversations/:id/messages no backend para salvar o histórico.
+```json
+{
+  "id": "uuid",
+  "name": "catalogo.pdf",
+  "type": "pdf",
+  "sizeBytes": 2412544,
+  "status": "ready",
+  "chunks": 42,
+  "vectors": 42,
+  "indexedAt": "2025-06-19T12:00:00.000Z",
+  "uploadedAt": "2025-06-19T11:00:00.000Z"
+}
 ```
 
 ---
 
-### 4.6 Assinaturas e planos
+### 6.2 Salvar chunks com embeddings
 
-**O que precisa existir:**
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `/api/knowledge/files/:fileId/chunks` |
+| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Quando chamar** | Após gerar embeddings (Workflow 07, passo 6) |
 
-- Cada usuário tem um plano (`free`, `starter`, `pro`, `business`).
-- Cada plano tem limites de uso (mensagens WhatsApp, mensagens chat, conversas).
-- O backend verifica os limites antes de processar cada mensagem.
-- O contador de uso é incrementado a cada mensagem processada.
+**Payload:**
 
-**Endpoints:**
-
-```
-GET  /subscription           → retorna plano, status e limites de uso do usuário
-PUT  /subscription           → atualiza plano (integração com pagamento, fase futura)
-```
-
-**Limites por plano (exemplo):**
-
-| Plano | WhatsApp msgs/mês | Chat msgs/mês |
-| --- | --- | --- |
-| Free | 100 | 50 |
-| Starter | 1.000 | 500 |
-| Pro | 5.000 | 2.000 |
-| Business | Ilimitado | Ilimitado |
-
----
-
-## 5. API REST — Endpoints necessários
-
-Aqui está **a lista completa** de todos os endpoints em ordem de prioridade:
-
-### Prioridade 1 — Essencial para o MVP funcionar
-
-```
-POST   /auth/register
-POST   /auth/login
-GET    /auth/me
-
-GET    /agent
-PUT    /agent
-GET    /agent/channels
-PUT    /agent/channels/:channelId       ← :channelId = 'whatsapp' ou 'personal_use'
-
-GET    /knowledge/files
-POST   /knowledge/files                 ← multipart/form-data
-DELETE /knowledge/files/:fileId
-POST   /knowledge/search               ← chamada interna do N8N
-
-GET    /conversations
-POST   /conversations
-GET    /conversations/:id
-POST   /conversations/:id/messages
-
-GET    /subscription
+```json
+{
+  "chunks": [
+    {
+      "content": "Trecho do documento...",
+      "chunkIndex": 0,
+      "embedding": [0.012, -0.034, 0.056, "... 1536 valores"]
+    },
+    {
+      "content": "Outro trecho...",
+      "chunkIndex": 1,
+      "embedding": [0.023, -0.045, 0.067, "..."]
+    }
+  ]
+}
 ```
 
-### Prioridade 2 — WhatsApp
+**Resposta:**
 
-```
-GET    /agent/whatsapp/status
-POST   /agent/whatsapp/connect
-POST   /agent/whatsapp/disconnect
-GET    /agent/whatsapp/qr
-
-POST   /webhooks/evolution             ← Evolution API avisa de eventos de conexão
-POST   /webhooks/whatsapp-message      ← Evolution API avisa de mensagem recebida (alternativo ao N8N direto)
-```
-
-### Prioridade 3 — Complementos
-
-```
-POST   /knowledge/files/:fileId/retry
-DELETE /conversations/:id
-GET    /conversations/:id/messages
+```json
+{ "saved": 2 }
 ```
 
 ---
 
-## 6. Integração com N8N
+### 6.3 Salvar histórico de conversa (WhatsApp)
 
-### 6.1 Papel do N8N no sistema
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `/api/conversations/internal` |
+| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Quando chamar** | Após gerar e enviar resposta WhatsApp (Workflow 06) |
 
-O N8N é o **motor de inteligência** da plataforma. Ele é responsável por:
+**Payload:**
 
-1. **Receber mensagens do WhatsApp** via webhook da Evolution API.
-2. **Orquestrar o fluxo de resposta:** buscar configs → buscar contexto → chamar LLM → responder.
-3. **Processar mensagens do chat interno** quando chamado pelo backend.
-4. **Processar arquivos** da base de conhecimento (chunking + embeddings) de forma assíncrona.
-
-O N8N **não é** responsável por:
-- Autenticar usuários.
-- Gerenciar planos/assinaturas.
-- Armazenar dados permanentes (isso é papel do backend + banco).
-
-### 6.2 Workflows necessários
-
-O desenvolvedor N8N precisa criar **4 workflows**:
-
----
-
-#### Workflow 1 — Resposta ao WhatsApp
-
-**Nome sugerido:** `whatsapp-incoming-message`
-
-**Trigger:** Webhook — Evolution API manda um POST quando o usuário final manda mensagem.
-
-**Passos:**
-
+```json
+{
+  "agentId": "uuid-do-agente",
+  "channel": "whatsapp",
+  "externalId": "5511999999999@s.whatsapp.net",
+  "contactName": "João Silva",
+  "contactPhone": "+55 11 99999-9999",
+  "title": "João Silva",
+  "messages": [
+    { "role": "user", "content": "Mensagem do cliente" },
+    { "role": "assistant", "content": "Resposta do agente" }
+  ]
+}
 ```
-1. [Webhook Trigger] Recebe a mensagem
-   ↓
-2. [HTTP Request] GET {BACKEND_URL}/agent?phone={número}
-   — busca as configs do agente pelo número do WhatsApp conectado
-   ↓
-3. [IF] O agente tem canal WhatsApp ativo?
-   — Não → encerra (não responde)
-   — Sim → continua
-   ↓
-4. [HTTP Request] POST {BACKEND_URL}/knowledge/search
-   Body: { query: <texto da mensagem>, topK: 5 }
-   — busca trechos relevantes da base de conhecimento
-   ↓
-5. [Code node] Monta o prompt do sistema:
-   — instruções do canal WhatsApp
-   — trechos da base de conhecimento como contexto
-   — parâmetros de personalidade (formality, objectivity, etc.) como instrução de estilo
-   ↓
-6. [HTTP Request] POST para a API do LLM (ex.: OpenAI /v1/chat/completions)
-   — manda histórico + prompt do sistema + mensagem do usuário
-   ↓
-7. [HTTP Request] POST {BACKEND_URL}/conversations/:id/messages
-   — salva a mensagem do usuário e a resposta do assistente no banco
-   ↓
-8. [HTTP Request] POST para Evolution API
-   — manda a resposta de volta para o cliente no WhatsApp
+
+**Resposta:**
+
+```json
+{
+  "id": "uuid-da-conversa",
+  "title": "João Silva",
+  "lastMessage": "Resposta do agente",
+  "lastMessageAt": "2025-06-19T12:00:00.000Z",
+  "messageCount": 2
+}
 ```
 
 ---
 
-#### Workflow 2 — Resposta ao Chat Interno (Uso Pessoal)
+### 6.4 Atualizar status de conexão WhatsApp
 
-**Nome sugerido:** `personal-use-chat`
+| Campo | Valor |
+| --- | --- |
+| **Método** | `PUT` |
+| **URL** | `/api/webhooks/whatsapp-status` |
+| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Quando chamar** | Ao receber eventos da Evolution (Workflow 08) |
 
-**Trigger:** Webhook — Backend chama este endpoint quando o usuário manda mensagem no chat interno.
+**Payload:**
 
-**Passos:**
-
+```json
+{
+  "instanceName": "flowassist-a1b2c3d4",
+  "connectionStatus": "connected",
+  "phoneNumber": "+55 11 98765-4321",
+  "connectedAt": "2025-06-19T12:00:00.000Z",
+  "qrCode": "data:image/png;base64,..."
+}
 ```
-1. [Webhook Trigger] Recebe { conversationId, message, agentConfig, knowledgeContext }
-   — o backend já busca configs e contexto antes de chamar o N8N
-   ↓
-2. [Code node] Monta o prompt do sistema com as configs do canal personal_use
-   ↓
-3. [HTTP Request] POST para a API do LLM
-   — manda o histórico + prompt do sistema + mensagem do usuário
-   ↓
-4. [Respond to Webhook] Retorna a resposta do LLM para o backend
-```
 
-> Neste workflow, o backend já montou o contexto e passou tudo. O N8N só precisa chamar o LLM e devolver a resposta. Isso é mais simples e rápido.
+**Valores de `connectionStatus`:** `disconnected` | `connecting` | `connected` | `reconnecting`
 
----
+**Resposta:**
 
-#### Workflow 3 — Processamento de arquivo (RAG)
-
-**Nome sugerido:** `knowledge-file-processing`
-
-**Trigger:** Webhook — Backend chama quando um arquivo foi uploadado e precisa ser processado.
-
-**Passos:**
-
-```
-1. [Webhook Trigger] Recebe { fileId, storageUrl, fileType, agentId }
-   ↓
-2. [HTTP Request] Baixa o arquivo do storage (S3/Supabase)
-   ↓
-3. [Switch/IF] Por tipo de arquivo:
-   — PDF → extrai texto com biblioteca/serviço de PDF parsing
-   — DOCX → extrai texto
-   — TXT/CSV → lê direto
-   — Imagem → OCR ou descreve com LLM Vision
-   ↓
-4. [Code node] Divide o texto em chunks de ~500 tokens com sobreposição de ~50 tokens
-   ↓
-5. [Loop] Para cada chunk:
-   a. [HTTP Request] POST para API de embeddings (ex.: OpenAI text-embedding-3-small)
-      — gera o vetor numérico do chunk
-   b. [HTTP Request] POST {BACKEND_URL}/knowledge/chunks
-      — salva o chunk + vetor no banco
-   ↓
-6. [HTTP Request] PUT {BACKEND_URL}/knowledge/files/:fileId
-   Body: { status: 'ready', chunks: N, vectors: N, indexedAt: <agora> }
-   — atualiza o status do arquivo no banco
-   ↓
-   (Em caso de erro em qualquer passo:)
-7. [HTTP Request] PUT {BACKEND_URL}/knowledge/files/:fileId
-   Body: { status: 'error', errorMessage: <mensagem> }
+```json
+{
+  "connectionStatus": "connected",
+  "phoneNumber": "+55 11 98765-4321",
+  "connectedAt": "2025-06-19T12:00:00.000Z"
+}
 ```
 
 ---
 
-#### Workflow 4 — Eventos de conexão WhatsApp
+### 6.5 Busca na base de conhecimento (referência)
 
-**Nome sugerido:** `whatsapp-connection-events`
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `/api/knowledge/search` |
+| **Auth** | `Authorization: Bearer {JWT}` (hoje) |
+| **Quando chamar** | Durante geração de resposta quando precisar de contexto RAG |
 
-**Trigger:** Webhook — Evolution API manda eventos de status (conectado, desconectado, QR gerado, etc.).
+**Payload:**
 
-**Passos:**
-
+```json
+{
+  "query": "qual o prazo de entrega?",
+  "topK": 5
+}
 ```
-1. [Webhook Trigger] Recebe evento da Evolution API
-   ↓
-2. [Switch] Tipo do evento:
-   — 'qr' → extrai o QR code e chama PUT {BACKEND_URL}/agent/whatsapp/status
-             Body: { connectionStatus: 'connecting', qrCode: <base64> }
-   
-   — 'open' (conectado) → chama PUT {BACKEND_URL}/agent/whatsapp/status
-             Body: { connectionStatus: 'connected', phoneNumber: <número>, connectedAt: <agora> }
-   
-   — 'close' (desconectado) → chama PUT {BACKEND_URL}/agent/whatsapp/status
-             Body: { connectionStatus: 'disconnected' }
+
+**Resposta:**
+
+```json
+[
+  {
+    "content": "O prazo de entrega é de 3 a 5 dias úteis...",
+    "score": 0.92,
+    "fileId": "uuid",
+    "chunkIndex": 3
+  }
+]
+```
+
+> Para workflows N8N sem JWT, implementar busca vetorial diretamente no PostgreSQL (recomendado) ou solicitar endpoint interno com webhook secret.
+
+---
+
+## 7. Webhooks expostos pelo N8N (chamados pelo backend)
+
+Base URL: `{N8N_URL}` (ex.: `http://localhost:5678`).
+
+Todas as chamadas do backend incluem:
+```
+Content-Type: application/json
+x-webhook-secret: {N8N_WEBHOOK_SECRET}
+```
+
+### 7.1 personal-use-chat
+
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `{N8N_URL}/webhook/personal-use-chat` |
+| **Quando** | `MOCK_AI=false` e usuário envia mensagem no chat interno |
+
+**Payload enviado pelo backend:**
+
+```json
+{
+  "systemPrompt": "Você é o assistente...\n\nDiretrizes de estilo:\n- Formalidade: equilibrado...",
+  "history": [
+    { "role": "user", "content": "mensagem anterior" },
+    { "role": "assistant", "content": "resposta anterior" }
+  ],
+  "userMessage": "nova mensagem do usuário",
+  "personality": {
+    "temperature": 55,
+    "creativity": 60,
+    "formality": 65,
+    "objectivity": 60,
+    "technicalLevel": 70,
+    "writingStyle": "detalhado",
+    "emojiUsage": "nunca",
+    "responseLength": "longa"
+  },
+  "knowledgeContext": "Trecho relevante da base...\n---\nOutro trecho..."
+}
+```
+
+**Resposta esperada:**
+
+```json
+{
+  "reply": "Texto da resposta do assistente."
+}
 ```
 
 ---
 
-### 6.3 O que o N8N precisa expor para o frontend/backend
+### 7.2 knowledge-file-processing
 
-O N8N precisa ter **URLs de webhook** que o backend usa para chamar os workflows. Você vai precisar configurar:
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `{N8N_URL}/webhook/knowledge-file-processing` |
+| **Quando** | `MOCK_RAG=false` e usuário faz upload de arquivo |
 
-| Workflow | URL do Webhook N8N | Chamado por |
-| --- | --- | --- |
-| `personal-use-chat` | `{N8N_URL}/webhook/personal-use-chat` | Backend (quando usuário manda mensagem no chat) |
-| `knowledge-file-processing` | `{N8N_URL}/webhook/knowledge-file-processing` | Backend (após upload de arquivo) |
-| `whatsapp-incoming-message` | `{N8N_URL}/webhook/whatsapp-incoming-message` | Evolution API (mensagem WhatsApp) |
-| `whatsapp-connection-events` | `{N8N_URL}/webhook/whatsapp-connection-events` | Evolution API (eventos de conexão) |
+**Payload enviado pelo backend:**
 
-> **Importante:** Essas URLs precisam estar protegidas. O N8N permite adicionar um cabeçalho de autenticação (`x-api-key`) ou usar a autenticação básica (Basic Auth). Configure isso para que só o backend e a Evolution API possam chamar esses webhooks.
+```json
+{
+  "fileId": "uuid-do-arquivo",
+  "agentId": "uuid-do-agente",
+  "storageUrl": "/uploads/uuid-catalogo.pdf",
+  "fileType": "pdf"
+}
+```
+
+**Resposta:** fire-and-forget (backend não aguarda). O N8N atualiza o backend via callbacks (seção 6).
 
 ---
 
-## 7. Como o frontend se conecta ao backend
+### 7.3 whatsapp-incoming (sugerido — implementar no N8N)
 
-O frontend atualmente é **100% mockado** — não faz chamadas HTTP reais. Para integrar com o backend, cada função mockada precisa ser substituída por uma chamada real.
+| Campo | Valor |
+| --- | --- |
+| **Método** | Webhook da Evolution API → N8N |
+| **URL** | Configurado na Evolution, apontando para Workflow 01 |
+| **Quando** | Cliente envia mensagem no WhatsApp |
 
-### Onde estão os mocks no frontend
+Este webhook **não é chamado pelo backend** — é configurado na Evolution API apontando diretamente para o N8N.
 
-| O que está mockado | Arquivo | O que substituir por |
-| --- | --- | --- |
-| Login / Registro | `src/contexts/auth-context.tsx` | `POST /auth/login` e `POST /auth/register` |
-| Dados do usuário logado | `src/contexts/auth-context.tsx` | `GET /auth/me` |
-| Configurações do agente | `src/contexts/settings-context.tsx` | `GET /agent` e `PUT /agent` |
-| Config dos canais | `src/contexts/settings-context.tsx` | `GET /agent/channels` e `PUT /agent/channels/:channelId` |
-| Status WhatsApp | `src/contexts/settings-context.tsx` | `GET /agent/whatsapp/status` |
-| Arquivos da base de conhecimento | `src/contexts/knowledge-base-context.tsx` | `GET /knowledge/files` e `POST /knowledge/files` |
-| Conversas e mensagens | `src/contexts/chat-context.tsx` | `GET /conversations` e `POST /conversations/:id/messages` |
-| Plano e assinatura | `src/mocks/subscription.ts` | `GET /subscription` |
+---
 
-### Padrão de integração
+## 8. Contratos de dados
 
-O frontend usa `fetch` nativo ou pode instalar **axios**. Crie um arquivo `src/lib/api.ts` centralizado:
+### 8.1 AgentPersonality
 
 ```typescript
-// src/lib/api.ts (a criar no frontend)
-const BASE_URL = import.meta.env.VITE_API_URL; // ex.: http://localhost:3000
-
-async function api(path: string, options?: RequestInit) {
-  const token = localStorage.getItem('flowassist_token');
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  });
-  if (!response.ok) throw new Error(`API Error: ${response.status}`);
-  return response.json();
+interface AgentPersonality {
+  temperature: number;       // 0-100
+  creativity: number;        // 0-100
+  formality: number;         // 0-100
+  objectivity: number;       // 0-100
+  technicalLevel: number;    // 0-100
+  writingStyle: "conciso" | "equilibrado" | "detalhado" | "narrativo";
+  emojiUsage: "nunca" | "as_vezes" | "frequente";
+  responseLength: "curta" | "media" | "longa";
 }
 ```
 
-### Variável de ambiente do frontend
+### 8.2 ChannelId
 
-Crie um arquivo `.env` na raiz do projeto frontend:
+Valores aceitos: `"personalUse"` | `"whatsapp"` (camelCase, alinhado ao frontend).
 
-```env
-VITE_API_URL=http://localhost:3000
-VITE_N8N_URL=http://localhost:5678
+### 8.3 KnowledgeFile status
+
+`"uploading"` → `"processing"` → `"ready"` | `"error"`
+
+### 8.4 Message role
+
+`"user"` | `"assistant"`
+
+### 8.5 Embedding
+
+- Dimensão: **1536** (OpenAI `text-embedding-3-small`)
+- Armazenamento: coluna `embedding vector(1536)` no PostgreSQL (pgvector)
+- Formato no callback: array de números `[0.012, -0.034, ...]`
+
+### 8.6 Mapeamento instância → agente
+
+O backend cria instâncias WhatsApp com o padrão:
+
+```
+instanceName = "flowassist-" + agentId.substring(0, 8)
+```
+
+O N8N deve usar `instanceName` para localizar o agente na tabela `whatsapp_connections`.
+
+### 8.7 Diagrama de sequência — Chat interno completo
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant API as Backend
+    participant N8N as N8N
+    participant LLM as LLM
+
+    FE->>API: POST /conversations/:id/messages
+    API->>API: Salva msg usuário
+    API->>API: Monta systemPrompt + RAG
+    API->>N8N: POST /webhook/personal-use-chat
+    N8N->>LLM: Chat completion
+    LLM-->>N8N: Resposta
+    N8N-->>API: { reply }
+    API->>API: Salva msg assistente
+    API-->>FE: { userMessage, assistantMessage }
+```
+
+### 8.8 Diagrama de sequência — WhatsApp completo
+
+```mermaid
+sequenceDiagram
+    participant WA as WhatsApp Cliente
+    participant EVO as Evolution API
+    participant N8N as N8N
+    participant LLM as LLM
+    participant API as Backend
+
+    WA->>EVO: Mensagem
+    EVO->>N8N: Webhook messages.upsert
+    N8N->>N8N: Resolver agentId + config
+    N8N->>N8N: Buscar RAG (se habilitado)
+    N8N->>LLM: Chat completion
+    LLM-->>N8N: Resposta
+    N8N->>EVO: Enviar mensagem
+    EVO->>WA: Resposta
+    N8N->>API: POST /conversations/internal
 ```
 
 ---
 
-## 8. Como o frontend se conecta ao N8N
+## 9. Mapa de ganchos no código do backend
 
-Em geral, o frontend **não chama o N8N diretamente**. Toda comunicação é:
+Para sair do mock mode, altere as flags no `.env` e garanta que os workflows N8N existam.
 
-```
-Frontend → Backend → N8N
-```
+| Arquivo | Função | Flag | Webhook N8N | O que fazer |
+| --- | --- | --- | --- | --- |
+| `src/infra/integrations/llm.client.ts` | `generateReply()` | `MOCK_AI` | `personal-use-chat` | Criar Workflow 05; retornar `{ reply }` |
+| `src/infra/integrations/n8n.client.ts` | `callN8nWebhook()` | — | (genérico) | Configurar `N8N_URL` e `N8N_WEBHOOK_SECRET` |
+| `src/modules/knowledge/knowledge.service.ts` | `startProcessing()` | `MOCK_RAG` | `knowledge-file-processing` | Criar Workflow 07 |
+| `src/infra/integrations/whatsapp.client.ts` | `createWhatsAppInstance()` | `MOCK_WHATSAPP` | — | Configurar `EVOLUTION_API_URL` e `EVOLUTION_API_KEY` |
+| `src/modules/chats/chat.service.ts` | `sendMessage()` | via `llm.client` | `personal-use-chat` | Orquestra chat; delega ao LLM client |
+| `src/modules/chats/chat.routes.ts` | `POST /internal` | — | callback N8N | Workflow 06 chama este endpoint |
+| `src/modules/webhooks/webhook.routes.ts` | `PUT /whatsapp-status` | — | callback N8N | Workflow 08 chama este endpoint |
+| `src/modules/knowledge/knowledge.routes.ts` | `PUT /files/:id`, `POST /chunks` | — | callback N8N | Workflow 07 chama estes endpoints |
 
-A única exceção possível é se você quiser fazer streaming de resposta do LLM em tempo real no chat (SSE/WebSocket). Nesse caso:
+### Checklist para go-live
 
-```
-Frontend → Backend → N8N → LLM (streaming) → Backend → Frontend (SSE)
-```
-
-Mas comece simples: sem streaming, tudo síncrono via backend.
-
----
-
-## 9. Segurança
-
-Regras que o desenvolvedor backend precisa seguir obrigatoriamente:
-
-### Autenticação e autorização
-
-- **Todas as rotas** (exceto `/auth/login` e `/auth/register`) exigem o token JWT.
-- **Nunca retorne dados de outro usuário.** Antes de qualquer operação no banco, verifique se o recurso pertence ao usuário logado.
-  - Exemplo: ao buscar `/agent`, o backend pega o `userId` do token, não de um parâmetro da URL.
-- **Rate limiting:** limite de 100 requisições por minuto por IP para evitar abuso.
-
-### Senhas
-
-- Use **bcrypt** com fator de custo mínimo de 12.
-- Nunca logue ou retorne o `password_hash`.
-
-### Uploads de arquivo
-
-- Valide o tipo do arquivo no backend (não confie só no frontend).
-- Limite o tamanho de cada arquivo (sugerir máximo de 20MB).
-- Armazene os arquivos no S3/Storage, nunca no servidor.
-
-### Webhooks
-
-- Os webhooks do N8N (`/webhooks/*`) e da Evolution API devem verificar um header secreto:
-  ```
-  x-webhook-secret: <valor configurado no .env>
-  ```
-
-### Tokens JWT
-
-- Tempo de expiração: 7 dias.
-- O segredo JWT (`JWT_SECRET`) deve ter pelo menos 32 caracteres aleatórios.
-- Nunca commit o `.env` no repositório.
+- [ ] Workflows 01–08 implementados no N8N
+- [ ] `MOCK_AI=false`, `MOCK_RAG=false`, `MOCK_WHATSAPP=false`
+- [ ] `N8N_URL`, `N8N_WEBHOOK_SECRET`, `WEBHOOK_SECRET` configurados
+- [ ] Evolution API rodando e webhooks apontando para N8N
+- [ ] Modelo de embedding configurado (1536 dims)
+- [ ] pgvector habilitado no PostgreSQL
+- [ ] Testar chat interno end-to-end
+- [ ] Testar upload → processamento → busca RAG
+- [ ] Testar WhatsApp: conexão QR → mensagem → resposta → histórico salvo
 
 ---
 
 ## 10. Variáveis de ambiente
 
-Crie um arquivo `.env` na raiz do backend. Estas são as variáveis obrigatórias:
+### No backend (referência para o N8N saber o que esperar)
 
-```env
-# Banco de dados
-DATABASE_URL=postgresql://user:password@localhost:5432/flowassist
-
-# Autenticação
-JWT_SECRET=sua_chave_secreta_aleatoria_com_32_caracteres_no_minimo
-JWT_EXPIRES_IN=7d
-
-# Servidor
-PORT=3000
-NODE_ENV=development
-
-# Storage (escolha um)
-S3_BUCKET=flowassist-files
-S3_REGION=us-east-1
-S3_ACCESS_KEY=...
-S3_SECRET_KEY=...
-# OU
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_KEY=...
-
-# LLM (escolha um)
-OPENAI_API_KEY=sk-...
-# OU
-GROQ_API_KEY=gsk_...
-
-# N8N
-N8N_URL=http://localhost:5678
-N8N_WEBHOOK_SECRET=outro_segredo_aleatorio
-
-# Evolution API (WhatsApp)
-EVOLUTION_API_URL=http://localhost:8080
-EVOLUTION_API_KEY=...
-
-# Webhook secret (para verificar chamadas externas)
-WEBHOOK_SECRET=mais_um_segredo
-```
-
----
-
-## 11. Ordem de implementação sugerida
-
-Siga essa ordem para não se perder. Cada fase entrega algo funcionando:
-
-### Fase 1 — Fundação (sem IA ainda)
-
-- [ ] Configurar o projeto Node.js + TypeScript + Fastify/Express
-- [ ] Conectar o PostgreSQL com Prisma
-- [ ] Criar as migrations de todas as tabelas (seção 3)
-- [ ] Implementar os endpoints de autenticação (registro + login + `/auth/me`)
-- [ ] Criar o agente e as configs de canal automaticamente no registro
-- [ ] Implementar os endpoints de agente (`GET /agent`, `PUT /agent`, `PUT /agent/channels/:channelId`)
-- [ ] Testar com Insomnia/Postman
-
-### Fase 2 — Base de conhecimento
-
-- [ ] Configurar S3 ou Supabase Storage
-- [ ] Implementar upload de arquivos (`POST /knowledge/files`)
-- [ ] Criar o workflow N8N de processamento de arquivo
-- [ ] Implementar busca semântica (`POST /knowledge/search`)
-- [ ] Ativar o pgvector no PostgreSQL
-
-### Fase 3 — Chat interno com IA
-
-- [ ] Criar o workflow N8N de chat (personal_use)
-- [ ] Implementar `POST /conversations/:id/messages` chamando o N8N
-- [ ] Integrar com o frontend (substituir mock do chat)
-
-### Fase 4 — WhatsApp
-
-- [ ] Instalar e configurar a Evolution API
-- [ ] Implementar endpoints de conexão WhatsApp
-- [ ] Criar o workflow N8N de mensagens WhatsApp
-- [ ] Criar o workflow N8N de eventos de conexão
-- [ ] Testar o fluxo completo: mensagem → resposta automática
-
-### Fase 5 — Integrar o frontend
-
-- [ ] Criar `src/lib/api.ts` no frontend
-- [ ] Substituir cada mock por uma chamada real, começando pela autenticação
-- [ ] Remover os dados mockados dos contexts
-- [ ] Testar o fluxo completo end-to-end
-
-### Fase 6 — Produção
-
-- [ ] Deploy do backend (Railway, Render, VPS com Docker)
-- [ ] Deploy do N8N (N8N Cloud ou Docker na VPS)
-- [ ] Deploy da Evolution API (Docker)
-- [ ] Configurar variáveis de ambiente de produção
-- [ ] Configurar HTTPS (SSL) obrigatório
-- [ ] Configurar backups automáticos do banco
-
----
-
-## Referências rápidas
-
-| Ferramenta | Documentação |
+| Variável | Descrição |
 | --- | --- |
-| N8N | https://docs.n8n.io |
-| Evolution API | https://doc.evolution-api.com |
-| Prisma | https://www.prisma.io/docs |
-| Fastify | https://fastify.dev/docs |
-| OpenAI Embeddings | https://platform.openai.com/docs/guides/embeddings |
-| pgvector | https://github.com/pgvector/pgvector |
-| JWT (jsonwebtoken) | https://www.npmjs.com/package/jsonwebtoken |
-| bcrypt | https://www.npmjs.com/package/bcrypt |
+| `N8N_URL` | URL base do N8N (ex.: `http://n8n:5678`) |
+| `N8N_WEBHOOK_SECRET` | Secret que o backend envia ao chamar N8N |
+| `WEBHOOK_SECRET` | Secret que o N8N envia ao chamar o backend |
+| `MOCK_AI` | `true` = sem N8N para chat |
+| `MOCK_RAG` | `true` = sem N8N para processamento |
+| `MOCK_WHATSAPP` | `true` = sem Evolution API |
+| `EVOLUTION_API_URL` | URL da Evolution API |
+| `EVOLUTION_API_KEY` | API key da Evolution |
+| `OPENAI_API_KEY` | Usado pelo N8N (não pelo backend diretamente) |
+
+### No N8N (credenciais a configurar)
+
+| Credencial | Uso |
+| --- | --- |
+| OpenAI API | Chat completion + embeddings |
+| Anthropic API | Alternativa ao OpenAI (futuro) |
+| Google AI (Gemini) | Alternativa ao OpenAI (futuro) |
+| Evolution API | Enviar/receber mensagens WhatsApp |
+| PostgreSQL | Busca vetorial direta (opcional) |
+| HTTP Header Auth | `x-webhook-secret` para validar chamadas |
+
+---
+
+## 11. Roadmap futuro
+
+### Provedores de LLM
+
+| Provedor | Workflow | Notas |
+| --- | --- | --- |
+| **OpenAI** | Workflow 05 | GPT-4o / GPT-4o-mini. Embeddings: `text-embedding-3-small` |
+| **Anthropic** | Workflow 05 (branch) | Claude 3.5 Sonnet. Ajustar formato de messages |
+| **Google Gemini** | Workflow 05 (branch) | Gemini 1.5 Pro. API diferente, mesmo contrato de saída `{ reply }` |
+
+Implementar um node Switch no Workflow 05 por `LLM_PROVIDER` env var.
+
+### RAG avançado
+
+- **Híbrido:** combinar busca vetorial + BM25 (keyword).
+- **Re-ranking:** usar Cohere Rerank ou cross-encoder após retrieval.
+- **Multi-formato:** pipelines específicos por tipo (tabela CSV → markdown, PDF com tabelas → structured extraction).
+- **Chunking inteligente:** respeitar parágrafos/seções em vez de tamanho fixo.
+
+### Multiagentes
+
+- Agente "roteador" que decide qual sub-agente responde (vendas, suporte, financeiro).
+- Cada sub-agente com personalidade e base de conhecimento próprias.
+- Workflow 05 vira orquestrador com Execute Workflow para sub-agentes.
+
+### Memória de longo prazo
+
+- Resumo automático de conversas antigas (summarization workflow).
+- Armazenar fatos extraídos sobre o contato (preferências, histórico de compras).
+- Tabela `contact_memory` com embeddings para recall em conversas futuras.
+- Workflow dedicado: após N mensagens, gerar resumo e salvar.
+
+### Endpoints internos sugeridos (futuro)
+
+Para workflows N8N sem JWT de usuário:
+
+| Endpoint | Propósito |
+| --- | --- |
+| `POST /api/internal/knowledge/search` | Busca RAG por `agentId` + webhook secret |
+| `GET /api/internal/agents/:agentId` | Configuração completa do agente |
+| `GET /api/internal/conversations/:externalId/messages` | Histórico WhatsApp por contato |
+
+---
+
+## Referência rápida — Todos os webhooks
+
+### N8N expõe (backend chama)
+
+| Path | Método | Workflow |
+| --- | --- | --- |
+| `/webhook/personal-use-chat` | POST | 05 |
+| `/webhook/knowledge-file-processing` | POST | 07 |
+
+### Backend expõe (N8N chama)
+
+| Path | Método | Workflow |
+| --- | --- | --- |
+| `/api/knowledge/files/:fileId` | PUT | 07 |
+| `/api/knowledge/files/:fileId/chunks` | POST | 07 |
+| `/api/conversations/internal` | POST | 06 |
+| `/api/webhooks/whatsapp-status` | PUT | 08 |
+| `/api/webhooks/evolution` | POST | 08 (alternativa direta) |
+
+---
+
+*Documento gerado para o FlowAssist v0.1. Última atualização: junho/2025.*

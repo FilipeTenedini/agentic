@@ -15,10 +15,14 @@ interface ChatThreadProps {
 }
 
 export function ChatThread({ conversation, onBack }: ChatThreadProps) {
-  const { getMessages, sendMessage, typingConversationId } = useChat();
+  const { getMessages, sendMessage, typingConversationId, loadMessages } = useChat();
   const messages = getMessages(conversation.id);
   const isTyping = typingConversationId === conversation.id;
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    loadMessages(conversation.id);
+  }, [conversation.id, loadMessages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
