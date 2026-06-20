@@ -35,14 +35,7 @@ export interface AgentPersonality {
   responseLength: "curta" | "media" | "longa";
 }
 
-export type KnowledgeFileType =
-  | "pdf"
-  | "docx"
-  | "txt"
-  | "csv"
-  | "xlsx"
-  | "image"
-  | "other";
+export type KnowledgeFileType = "csv" | "xlsx";
 
 export type KnowledgeFileStatus = "uploading" | "processing" | "ready" | "error";
 

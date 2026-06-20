@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { UploadCloud } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useKnowledgeBase } from "@/contexts/knowledge-base-context";
@@ -15,11 +14,6 @@ export function KnowledgeFileUpload() {
   function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     addFiles(files);
-    toast.success(
-      files.length === 1
-        ? "Arquivo enviado. Processando..."
-        : `${files.length} arquivos enviados. Processando...`
-    );
   }
 
   return (
@@ -47,8 +41,8 @@ export function KnowledgeFileUpload() {
           Arraste arquivos aqui ou clique para enviar
         </p>
         <p className="mx-auto max-w-md text-xs text-muted-foreground">
-          PDF, DOCX, TXT, CSV, XLSX e imagens (PNG/JPG). O assistente usará esse
-          material para responder com mais contexto.
+          Apenas planilhas CSV e XLSX. O assistente usará esse material para
+          responder com mais contexto.
         </p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}>

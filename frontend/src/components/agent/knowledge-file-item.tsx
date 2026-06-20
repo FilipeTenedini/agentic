@@ -1,8 +1,6 @@
 import {
   CheckCircle2,
   FileSpreadsheet,
-  FileText,
-  Image as ImageIcon,
   Loader2,
   RotateCw,
   Trash2,
@@ -17,17 +15,7 @@ import {
   formatFileSize,
 } from "@/mocks/knowledge-base";
 import { cn } from "@/lib/utils";
-import type { KnowledgeFile, KnowledgeFileType } from "@/types";
-
-const TYPE_ICON: Record<KnowledgeFileType, typeof FileText> = {
-  pdf: FileText,
-  docx: FileText,
-  txt: FileText,
-  csv: FileSpreadsheet,
-  xlsx: FileSpreadsheet,
-  image: ImageIcon,
-  other: FileText,
-};
+import type { KnowledgeFile } from "@/types";
 
 interface KnowledgeFileItemProps {
   file: KnowledgeFile;
@@ -73,7 +61,6 @@ export function KnowledgeFileItem({
   onRemove,
   onRetry,
 }: KnowledgeFileItemProps) {
-  const Icon = TYPE_ICON[file.type];
   const isBusy = file.status === "uploading" || file.status === "processing";
 
   return (
@@ -86,7 +73,7 @@ export function KnowledgeFileItem({
             : "bg-muted text-muted-foreground"
         )}
       >
-        <Icon className="size-5" />
+        <FileSpreadsheet className="size-5" />
       </span>
 
       <div className="min-w-0 flex-1 space-y-1.5">

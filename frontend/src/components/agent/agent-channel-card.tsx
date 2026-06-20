@@ -128,23 +128,6 @@ export function AgentChannelCard({ channelId }: { channelId: ChannelId }) {
             </>
           )}
 
-          {/* Resumo da configuração */}
-          <Separator />
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-md bg-muted/50 px-3 py-2">
-              <p className="text-[11px] text-muted-foreground">Estilo de escrita</p>
-              <p className="text-sm font-medium">{styleLabel}</p>
-            </div>
-            <div className="rounded-md bg-muted/50 px-3 py-2">
-              <p className="text-[11px] text-muted-foreground">Instruções</p>
-              <p className="text-sm font-medium">
-                {channel.instructions.trim().length > 0
-                  ? `${channel.instructions.trim().slice(0, 28)}…`
-                  : "Não definidas"}
-              </p>
-            </div>
-          </div>
-
           {/* Badge de status + botão editar */}
           <div className="mt-auto flex items-center justify-between">
             <Badge variant={channel.enabled ? "success" : "secondary"}>

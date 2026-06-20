@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
+import type { MulterError } from "multer";
 import { ZodError } from "zod";
 import { isProduction } from "../../config/env.js";
+import { ALLOWED_KNOWLEDGE_FILE_MESSAGE } from "../../modules/knowledge/knowledge.constants.js";
 
 /**
  * Erro de aplicacao com status HTTP. Use para erros esperados/de negocio
@@ -41,14 +43,30 @@ export function errorHandler(
     });
   }
 
+  const multerErr = err as MulterError;
+  if (multerErr?.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({
+      error: "Arquivo excede o tamanho maximo permitido.",
+    });
+  }
+
+  if (err instanceof Error && err.message === ALLOWED_KNOWLEDGE_FILE_MESSAGE) {
+    return res.status(400).json({ error: err.message });
+  }
+
   if (err instanceof AppError) {
+    if (!isProduction && err.statusCode >= 400) {
+      console.warn(
+        `[${_req.method} ${_req.originalUrl}] ${err.statusCode} ${err.message}`
+      );
+    }
     return res.status(err.statusCode).json({
       error: err.message,
       ...(err.details ? { details: err.details } : {}),
     });
   }
 
-  console.error("Erro nao tratado:", err);
+  console.error(`[${_req.method} ${_req.originalUrl}] Erro nao tratado:`, err);
   return res.status(500).json({
     error: "Erro interno do servidor",
     ...(isProduction ? {} : { detail: String(err) }),

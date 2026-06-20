@@ -1,0 +1,81 @@
+{
+  "name": "FlowAssist 06 - Salvar Historico",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e61785a9-a472-4ee2-aed5-051a72189547",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/conversations/internal' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  agentId: $json.agentId,\n  channel: 'whatsapp',\n  externalId: $json.externalId,\n  contactName: $json.contactName,\n  contactPhone: $json.contactPhone,\n  title: $json.contactName,\n  messages: [\n    { role: 'user', content: $json.userMessage },\n    { role: 'assistant', content: $json.assistantMessage },\n  ],\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "eb63d53f-df04-4e1c-a8d8-0cb55f5e2cf1",
+      "name": "Salvar conversa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        280,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Salvar conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "id": "rsgZX66Iqaw",
+  "versionId": "90f0c0cc-9fb8-4199-b133-b2870c52aa6e",
+  "createdAt": "2026-06-20T14:08:34.248Z",
+  "updatedAt": "2026-06-20T14:08:34.248Z",
+  "triggerCount": 0
+}

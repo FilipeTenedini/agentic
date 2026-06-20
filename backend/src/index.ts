@@ -4,15 +4,24 @@ import { ensureDatabaseReady, disconnectPrisma } from "./infra/prisma.js";
 import { resumeStuckMockProcessing } from "./modules/knowledge/knowledge.service.js";
 
 async function bootstrap() {
+  console.log("Iniciando FlowAssist backend...");
+
+  console.log("Conectando ao PostgreSQL...");
   await ensureDatabaseReady();
-  await resumeStuckMockProcessing();
+  console.log("Banco de dados pronto.");
+
+  const resumed = await resumeStuckMockProcessing();
+  if (resumed > 0) {
+    console.log(`${resumed} arquivo(s) retomando processamento mock.`);
+  }
 
   const app = createServer();
   const server = app.listen(env.PORT, () => {
-    console.log(`FlowAssist backend rodando em http://localhost:${env.PORT}`);
+    console.log(`Servidor HTTP em http://localhost:${env.PORT}`);
     console.log(
       `Mock mode -> AI: ${env.MOCK_AI} | RAG: ${env.MOCK_RAG} | WhatsApp: ${env.MOCK_WHATSAPP}`
     );
+    console.log("Aguardando requisicoes...\n");
   });
 
   const shutdown = async (signal: string) => {

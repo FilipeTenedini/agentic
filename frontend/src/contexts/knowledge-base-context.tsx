@@ -8,9 +8,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 
 import { api, getToken } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
+import {
+  ALLOWED_KNOWLEDGE_FILE_MESSAGE,
+  isAllowedKnowledgeFileName,
+} from "@/mocks/knowledge-base";
 import type { KnowledgeFile } from "@/types";
 
 interface KnowledgeBaseContextValue {
@@ -127,12 +132,32 @@ export function KnowledgeBaseProvider({ children }: { children: ReactNode }) {
   const addFiles = useCallback((incoming: FileList | File[]) => {
     const list = Array.from(incoming);
     if (list.length === 0) return;
+
+    const allowed = list.filter((file) => isAllowedKnowledgeFileName(file.name));
+    const rejected = list.length - allowed.length;
+
+    if (rejected > 0) {
+      toast.error(ALLOWED_KNOWLEDGE_FILE_MESSAGE);
+    }
+    if (allowed.length === 0) return;
+
+    toast.success(
+      allowed.length === 1
+        ? "Arquivo enviado. Processando..."
+        : `${allowed.length} arquivos enviados. Processando...`
+    );
+
     Promise.all(
-      list.map((file) =>
+      allowed.map((file) =>
         api.knowledge
           .upload(file)
           .then((created) => setFiles((prev) => [created, ...prev]))
-          .catch((err) => console.error("Falha no upload:", err))
+          .catch((err) => {
+            console.error("Falha no upload:", err);
+            toast.error(
+              err instanceof Error ? err.message : "Falha ao enviar arquivo."
+            );
+          })
       )
     ).catch(() => undefined);
   }, []);

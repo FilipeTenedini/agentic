@@ -5,12 +5,23 @@ import { asyncHandler } from "../../shared/utils/http.js";
 import { requireAuth } from "../../shared/middlewares/auth.middleware.js";
 import { requireWebhookSecret } from "../../shared/middlewares/webhook-auth.middleware.js";
 import { validate } from "../../shared/middlewares/validate.js";
+import {
+  ALLOWED_KNOWLEDGE_FILE_MESSAGE,
+  isAllowedKnowledgeFileName,
+} from "./knowledge.constants.js";
 import * as knowledgeController from "./knowledge.controller.js";
 import { chunksSchema, fileStatusSchema, searchSchema } from "./knowledge.dto.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: env.MAX_UPLOAD_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedKnowledgeFileName(file.originalname)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error(ALLOWED_KNOWLEDGE_FILE_MESSAGE));
+  },
 });
 
 export const knowledgeRouter = Router();

@@ -18,7 +18,10 @@ export async function callN8nWebhook<T = unknown>({
   path,
   payload,
 }: N8nCallOptions): Promise<T> {
-  const url = `${env.N8N_URL.replace(/\/$/, "")}/webhook/${path}`;
+  const url = `${env.N8N_URL}/${path}`;
+  console.log("url", url);
+  console.log("payload", payload);
+  console.log("env.N8N_WEBHOOK_SECRET", env.N8N_WEBHOOK_SECRET);
   const response = await fetch(url, {
     method: "POST",
     headers: {

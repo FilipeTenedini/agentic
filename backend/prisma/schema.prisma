@@ -128,7 +128,7 @@ model KnowledgeFile {
   id           String    @id @default(uuid())
   agentId      String    @map("agent_id")
   name         String
-  type         String // pdf | docx | txt | csv | xlsx | image | other
+  type         String // csv | xlsx
   sizeBytes    Int       @map("size_bytes")
   status       String    @default("uploading") // uploading | processing | ready | error
   progress     Int?

@@ -38,8 +38,14 @@ const envSchema = z.object({
 
   WEBHOOK_SECRET: z.string().default("dev-webhook-secret"),
 
-  STORAGE_DRIVER: z.enum(["local", "s3", "supabase"]).default("local"),
-  STORAGE_LOCAL_DIR: z.string().default("uploads"),
+  AWS_REGION: z.string().min(1, "AWS_REGION e obrigatorio"),
+  AWS_ACCESS_KEY_ID: z.string().min(1, "AWS_ACCESS_KEY_ID e obrigatorio"),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1, "AWS_SECRET_ACCESS_KEY e obrigatorio"),
+  AWS_S3_BUCKET: z.string().min(1, "AWS_S3_BUCKET e obrigatorio"),
+  AWS_S3_ENDPOINT: z.string().optional(),
+  AWS_S3_FORCE_PATH_STYLE: booleanFromString.default("false"),
+  S3_SIGNED_URL_EXPIRES_SECONDS: z.coerce.number().default(3600),
+
   MAX_UPLOAD_BYTES: z.coerce.number().default(20 * 1024 * 1024),
 });
 

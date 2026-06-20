@@ -1,0 +1,278 @@
+{
+  "name": "FlowAssist 07 - Processar Arquivo",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge-file-processing",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "d9c21dca-5077-4b6d-aa31-ad68e7a3f972",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "33868d57-401b-4f81-86ae-1109703afbcd"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\nconst expected = $env.N8N_WEBHOOK_SECRET || 'dev-n8n-secret';\nif (secret !== expected) throw new Error('Unauthorized');\n\nconst body = item.body ?? item;\nif (!body.fileId || !body.agentId || !body.storageUrl || !body.downloadUrl) {\n  throw new Error('Payload invalido');\n}\nreturn [{ json: body }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "71cae54a-4471-4177-9875-56fd05996b43",
+      "name": "Validar e iniciar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"processing\", progress: 0 }) }}"
+      },
+      "id": "c86c206c-dcff-4018-b105-a5fb876f66a6",
+      "name": "Status processing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Validar e iniciar').item.json;\nconst downloadUrl = meta.downloadUrl;\nif (!downloadUrl) throw new Error('downloadUrl ausente no payload');\n\nconst response = await fetch(downloadUrl);\nif (!response.ok) throw new Error('Falha ao baixar arquivo do S3: ' + response.status);\nconst buf = Buffer.from(await response.arrayBuffer());\n\nlet text = '';\nif (meta.fileType === 'csv') {\n  text = buf.toString('utf-8');\n} else if (meta.fileType === 'xlsx') {\n  throw new Error('Processamento de XLSX ainda nao implementado no N8N. Use CSV por enquanto.');\n} else {\n  throw new Error('Tipo nao suportado: ' + meta.fileType + '. Use csv ou xlsx.');\n}\n\nconst chunkSize = 3200;\nconst overlap = 320;\nconst chunks = [];\nlet i = 0;\nlet idx = 0;\nwhile (i < text.length) {\n  const slice = text.slice(i, i + chunkSize).trim();\n  if (slice) chunks.push({ content: slice, chunkIndex: idx++ });\n  if (i + chunkSize >= text.length) break;\n  i += chunkSize - overlap;\n}\n\nif (!chunks.length) throw new Error('Nenhum texto extraido do arquivo');\nreturn [{ json: { ...meta, chunks } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "0d59ffb8-7fbd-4e74-9fa1-99c8e53d2434",
+      "name": "Extrair e chunkar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $('Validar e iniciar').item.json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ progress: 45 }) }}"
+      },
+      "id": "1e9e0d7e-7541-44b5-984d-56e7c986b25f",
+      "name": "Progress 45",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Extrair e chunkar').item.json;\nconst apiKey = $env.OPENAI_API_KEY;\nif (!apiKey) throw new Error('OPENAI_API_KEY nao configurada');\n\nconst results = [];\nfor (const chunk of meta.chunks) {\n  const res = await fetch('https://api.openai.com/v1/embeddings', {\n    method: 'POST',\n    headers: {\n      Authorization: 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n    },\n    body: JSON.stringify({ model: 'text-embedding-3-small', input: chunk.content }),\n  });\n  const data = await res.json();\n  if (!data.data?.[0]?.embedding) throw new Error('Falha no embedding');\n  results.push({\n    content: chunk.content,\n    chunkIndex: chunk.chunkIndex,\n    embedding: data.data[0].embedding,\n  });\n}\nreturn [{ json: { fileId: meta.fileId, chunks: results } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "747cce53-42df-4b2a-a9ac-ce301fcec638",
+      "name": "Gerar embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $json.fileId + '/chunks' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chunks: $json.chunks }) }}"
+      },
+      "id": "9b0961e5-c6b0-4540-8d53-ec8a94fbaca2",
+      "name": "Salvar chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $('Gerar embeddings').item.json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  status: 'ready',\n  chunks: $('Gerar embeddings').item.json.chunks.length,\n  vectors: $('Gerar embeddings').item.json.chunks.length,\n  indexedAt: new Date().toISOString(),\n}) }}"
+      },
+      "id": "ae61cf74-0c09-4636-9e40-3c3912a42452",
+      "name": "Finalizar ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1820,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validar e iniciar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar e iniciar": {
+      "main": [
+        [
+          {
+            "node": "Status processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status processing": {
+      "main": [
+        [
+          {
+            "node": "Extrair e chunkar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair e chunkar": {
+      "main": [
+        [
+          {
+            "node": "Progress 45",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress 45": {
+      "main": [
+        [
+          {
+            "node": "Gerar embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar embeddings": {
+      "main": [
+        [
+          {
+            "node": "Salvar chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar chunks": {
+      "main": [
+        [
+          {
+            "node": "Finalizar ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "id": "AtxnAldTA6s",
+  "versionId": "b1a64510-02fe-4f2b-a52a-3409ae86ea68",
+  "createdAt": "2026-06-20T14:08:34.249Z",
+  "updatedAt": "2026-06-20T14:08:34.249Z",
+  "triggerCount": 0
+}

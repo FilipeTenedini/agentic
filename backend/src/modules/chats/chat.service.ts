@@ -143,6 +143,8 @@ export async function sendMessage(
     knowledgeContext,
   });
 
+  console.log("systemPrompt", systemPrompt);
+
   const replyText = await generateReply({
     systemPrompt,
     history: llmHistory,

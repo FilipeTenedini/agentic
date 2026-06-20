@@ -3,6 +3,7 @@ import { hashPassword } from "../src/shared/utils/password.js";
 import { DEFAULT_PERSONALITY } from "../src/shared/domain/personality.js";
 import { asJson } from "../src/shared/utils/json.js";
 import { PLAN_CATALOG } from "../src/modules/subscriptions/plans.catalog.js";
+import { buildStorageUrl } from "../src/infra/integrations/storage.js";
 
 const prisma = new PrismaClient();
 
@@ -117,56 +118,52 @@ async function main() {
   });
 
   console.log("Seed: base de conhecimento...");
+  const demoStorage = (name: string) =>
+    buildStorageUrl(user.id, name.replace(/[^a-zA-Z0-9._-]/g, "_"));
+
   await prisma.knowledgeFile.createMany({
     data: [
-      {
-        agentId: agent.id,
-        name: "Catálogo de produtos 2025.pdf",
-        type: "pdf",
-        sizeBytes: 2_412_544,
-        status: "ready",
-        uploadedAt: new Date("2025-06-15T09:30:00Z"),
-        chunks: 128,
-        vectors: 128,
-        indexedAt: new Date("2025-06-15T09:32:00Z"),
-      },
-      {
-        agentId: agent.id,
-        name: "Política de trocas e devoluções.docx",
-        type: "docx",
-        sizeBytes: 184_320,
-        status: "ready",
-        uploadedAt: new Date("2025-06-15T09:31:00Z"),
-        chunks: 22,
-        vectors: 22,
-        indexedAt: new Date("2025-06-15T09:33:00Z"),
-      },
-      {
-        agentId: agent.id,
-        name: "Perguntas frequentes.txt",
-        type: "txt",
-        sizeBytes: 24_576,
-        status: "ready",
-        uploadedAt: new Date("2025-06-16T14:10:00Z"),
-        chunks: 9,
-        vectors: 9,
-        indexedAt: new Date("2025-06-16T14:11:00Z"),
-      },
       {
         agentId: agent.id,
         name: "Tabela de preços.xlsx",
         type: "xlsx",
         sizeBytes: 96_000,
-        status: "processing",
-        progress: 62,
-        uploadedAt: new Date("2025-06-18T16:00:00Z"),
+        status: "ready",
+        storageUrl: demoStorage("Tabela_de_precos.xlsx"),
+        uploadedAt: new Date("2025-06-15T09:30:00Z"),
+        chunks: 48,
+        vectors: 48,
+        indexedAt: new Date("2025-06-15T09:32:00Z"),
       },
       {
         agentId: agent.id,
         name: "Base de clientes (export).csv",
         type: "csv",
         sizeBytes: 512_000,
+        status: "ready",
+        storageUrl: demoStorage("Base_de_clientes__export_.csv"),
+        uploadedAt: new Date("2025-06-16T14:10:00Z"),
+        chunks: 22,
+        vectors: 22,
+        indexedAt: new Date("2025-06-16T14:11:00Z"),
+      },
+      {
+        agentId: agent.id,
+        name: "Estoque atual.xlsx",
+        type: "xlsx",
+        sizeBytes: 184_320,
+        status: "processing",
+        progress: 62,
+        storageUrl: demoStorage("Estoque_atual.xlsx"),
+        uploadedAt: new Date("2025-06-18T16:00:00Z"),
+      },
+      {
+        agentId: agent.id,
+        name: "Vendas junho.csv",
+        type: "csv",
+        sizeBytes: 24_576,
         status: "error",
+        storageUrl: demoStorage("Vendas_junho.csv"),
         errorMessage:
           "Não foi possível ler o arquivo. Verifique o formato e tente novamente.",
         uploadedAt: new Date("2025-06-18T16:05:00Z"),
@@ -310,7 +307,7 @@ async function main() {
       {
         userId: user.id,
         type: "knowledge",
-        description: 'Arquivo "Catálogo de produtos 2025.pdf" adicionado à base',
+        description: 'Arquivo "Tabela de preços.xlsx" adicionado à base',
         createdAt: new Date("2025-06-18T16:10:00Z"),
       },
       {

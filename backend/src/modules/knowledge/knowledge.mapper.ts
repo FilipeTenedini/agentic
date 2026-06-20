@@ -1,13 +1,7 @@
 import type { KnowledgeFile } from "@prisma/client";
+import type { AllowedKnowledgeFileType } from "./knowledge.constants.js";
 
-export type KnowledgeFileType =
-  | "pdf"
-  | "docx"
-  | "txt"
-  | "csv"
-  | "xlsx"
-  | "image"
-  | "other";
+export type KnowledgeFileType = AllowedKnowledgeFileType;
 
 /** Espelha o tipo `KnowledgeFile` do frontend. */
 export interface KnowledgeFileDTO {
@@ -38,24 +32,4 @@ export function toKnowledgeFileDTO(file: KnowledgeFile): KnowledgeFileDTO {
     vectors: file.vectors ?? undefined,
     indexedAt: file.indexedAt?.toISOString(),
   };
-}
-
-const EXTENSION_TO_TYPE: Record<string, KnowledgeFileType> = {
-  pdf: "pdf",
-  doc: "docx",
-  docx: "docx",
-  txt: "txt",
-  csv: "csv",
-  xls: "xlsx",
-  xlsx: "xlsx",
-  png: "image",
-  jpg: "image",
-  jpeg: "image",
-  webp: "image",
-  gif: "image",
-};
-
-export function getFileTypeFromName(name: string): KnowledgeFileType {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  return EXTENSION_TO_TYPE[ext] ?? "other";
 }

@@ -4,7 +4,7 @@ export const MOCK_ACTIVITIES: Activity[] = [
   {
     id: "act-000",
     type: "knowledge",
-    description: "Arquivo \"Catálogo de produtos 2025.pdf\" adicionado à base",
+    description: "Arquivo \"Tabela de preços.xlsx\" adicionado à base",
     timestamp: "2025-06-18T16:10:00Z",
   },
   {

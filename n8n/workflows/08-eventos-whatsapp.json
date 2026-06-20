@@ -1,0 +1,196 @@
+{
+  "name": "FlowAssist 08 - Eventos WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-events",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "14257b54-e86b-40dc-a93d-9f895c4eb62e",
+      "name": "Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "82763adc-9bd4-4980-990c-f4e5968a6b8c"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\nconst instanceName = p.instance || p.instanceName || p.data?.instance;\nconst event = (p.event || p.data?.event || '').toLowerCase();\n\nlet connectionStatus = 'disconnected';\nlet qrCode = null;\nlet phoneNumber = null;\nlet connectedAt = null;\n\nif (event.includes('qrcode')) {\n  connectionStatus = 'connecting';\n  qrCode = p.data?.qrcode?.base64 || p.qrcode || p.data?.qrcode || null;\n} else if (event.includes('open') || p.data?.state === 'open') {\n  connectionStatus = 'connected';\n  phoneNumber = p.data?.phoneNumber || p.data?.wid?.user || null;\n  connectedAt = new Date().toISOString();\n} else if (event.includes('close')) {\n  connectionStatus = 'disconnected';\n} else if (event.includes('connecting')) {\n  connectionStatus = 'reconnecting';\n}\n\nif (!instanceName || !String(instanceName).startsWith('flowassist-')) {\n  return [{ json: { skip: true } }];\n}\n\nreturn [{ json: { skip: false, instanceName, connectionStatus, qrCode, phoneNumber, connectedAt } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "40cbe1e5-ba40-40dc-9a4c-f1dcd895c184",
+      "name": "Normalizar evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "851b4057-eb4b-4826-99ac-2da8a80d65a4",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c5e296fd-221c-4e2c-b04a-ad6d72ca0813",
+      "name": "Instancia valida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/webhooks/whatsapp-status' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ instanceName: $json.instanceName, connectionStatus: $json.connectionStatus, phoneNumber: $json.phoneNumber, connectedAt: $json.connectedAt, qrCode: $json.qrCode }) }}"
+      },
+      "id": "688661ab-7910-4785-9496-e8b7d881f3bb",
+      "name": "Atualizar backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "bab921db-fcec-4432-9c66-2197373dcac8",
+      "name": "OK",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, skipped: true } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "d5c177a5-d342-4f8a-94e4-e10ab17082be",
+      "name": "Ignorar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": {
+      "main": [
+        [
+          {
+            "node": "Normalizar evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar evento": {
+      "main": [
+        [
+          {
+            "node": "Instancia valida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instancia valida?": {
+      "main": [
+        [
+          {
+            "node": "Atualizar backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar backend": {
+      "main": [
+        [
+          {
+            "node": "OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "id": "dHp098MV4dQ",
+  "versionId": "48531f8f-f828-4374-a1d7-5771c5674212",
+  "createdAt": "2026-06-20T14:08:34.251Z",
+  "updatedAt": "2026-06-20T14:08:34.251Z",
+  "triggerCount": 0
+}

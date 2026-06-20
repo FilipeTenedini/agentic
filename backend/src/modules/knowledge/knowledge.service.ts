@@ -1,12 +1,15 @@
 import { prisma } from "../../infra/prisma.js";
 import { env } from "../../config/env.js";
-import { NotFound } from "../../infra/http/errors.js";
-import { saveFile, deleteFile } from "../../infra/integrations/storage.js";
+import { NotFound, BadRequest } from "../../infra/http/errors.js";
+import { saveFile, deleteFile, getSignedDownloadUrl } from "../../infra/integrations/storage.js";
 import { triggerN8nWebhook } from "../../infra/integrations/n8n.client.js";
 import { logActivity } from "../activities/activity.service.js";
 import { getAgentId } from "../agents/agent.service.js";
 import {
+  ALLOWED_KNOWLEDGE_FILE_MESSAGE,
   getFileTypeFromName,
+} from "./knowledge.constants.js";
+import {
   toKnowledgeFileDTO,
   type KnowledgeFileDTO,
 } from "./knowledge.mapper.js";
@@ -38,13 +41,16 @@ export async function addFile(
   upload: { originalname: string; size: number; buffer: Buffer }
 ): Promise<KnowledgeFileDTO> {
   const agentId = await getAgentId(userId);
-  const stored = await saveFile(upload.originalname, upload.buffer);
+  const fileType = getFileTypeFromName(upload.originalname);
+  if (!fileType) throw BadRequest(ALLOWED_KNOWLEDGE_FILE_MESSAGE);
+
+  const stored = await saveFile(userId, upload.originalname, upload.buffer);
 
   const file = await prisma.knowledgeFile.create({
     data: {
       agentId,
       name: upload.originalname,
-      type: getFileTypeFromName(upload.originalname),
+      type: fileType,
       sizeBytes: upload.size,
       status: "uploading",
       progress: 0,
@@ -104,18 +110,30 @@ function startProcessing(
   fileType: string
 ) {
   if (!env.MOCK_RAG) {
-    triggerN8nWebhook({
-      path: "knowledge-file-processing",
-      payload: { fileId, agentId, storageUrl, fileType },
-    });
+    void (async () => {
+      const downloadUrl = storageUrl
+        ? await getSignedDownloadUrl(storageUrl).catch((err) => {
+            console.error(
+              `Falha ao gerar URL de download para ${fileId}:`,
+              err
+            );
+            return null;
+          })
+        : null;
+
+      triggerN8nWebhook({
+        path: "knowledge-file-processing",
+        payload: { fileId, agentId, storageUrl, downloadUrl, fileType },
+      });
+    })();
     return;
   }
   simulateProcessing(fileId);
 }
 
 /** Retoma arquivos presos em uploading/processing apos restart do servidor (mock). */
-export async function resumeStuckMockProcessing(): Promise<void> {
-  if (!env.MOCK_RAG) return;
+export async function resumeStuckMockProcessing(): Promise<number> {
+  if (!env.MOCK_RAG) return 0;
   const stuck = await prisma.knowledgeFile.findMany({
     where: { status: { in: ["uploading", "processing"] } },
     select: { id: true },
@@ -123,6 +141,7 @@ export async function resumeStuckMockProcessing(): Promise<void> {
   for (const { id } of stuck) {
     simulateProcessing(id);
   }
+  return stuck.length;
 }
 
 /** Simulacao do pipeline de RAG (espelha o frontend knowledge-base-context). */

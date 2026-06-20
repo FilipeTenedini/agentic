@@ -1,0 +1,1918 @@
+[
+  {
+    "name": "FlowAssist 02 - Buscar Agente",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "ac7a07e2-1428-4662-bb56-a08b0b79504b",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT id, name, base_instructions, base_personality FROM agents WHERE id = $1 LIMIT 1;",
+          "options": {
+            "queryReplacement": "={{ $json.agentId }}"
+          }
+        },
+        "id": "7f4c676c-720b-44ff-aa85-4cb7bdc6bf40",
+        "name": "Buscar agente",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.4,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT channel_id, enabled, use_shared_personality, use_shared_knowledge_base, personality, instructions\nFROM channel_configs WHERE agent_id = $1 AND channel_id = $2 LIMIT 1;",
+          "options": {
+            "queryReplacement": "={{ $('Execute Workflow Trigger').item.json.agentId }},{{ $('Execute Workflow Trigger').item.json.channelId }}"
+          }
+        },
+        "id": "7d1e0c24-656d-4c85-a79e-cabfc2cf2767",
+        "name": "Buscar canal",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.4,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $('Execute Workflow Trigger').item.json;\nconst agent = $('Buscar agente').item.json;\nconst channel = $('Buscar canal').item.json;\n\nif (!agent?.id) throw new Error('Agente nao encontrado: ' + input.agentId);\nif (!channel?.channel_id) throw new Error('Canal nao encontrado: ' + input.channelId);\n\nconst parse = (v) => (typeof v === 'string' ? JSON.parse(v) : v);\n\nreturn [{\n  json: {\n    agentId: agent.id,\n    agentName: agent.name,\n    baseInstructions: agent.base_instructions,\n    basePersonality: parse(agent.base_personality),\n    channel: {\n      channelId: channel.channel_id,\n      enabled: channel.enabled,\n      useSharedPersonality: channel.use_shared_personality,\n      useSharedKnowledgeBase: channel.use_shared_knowledge_base,\n      personality: channel.personality ? parse(channel.personality) : null,\n      instructions: channel.instructions || '',\n    },\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "eb8e99a3-969b-4c34-aaab-b50c04931d14",
+        "name": "Montar config",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Buscar agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar agente": {
+        "main": [
+          [
+            {
+              "node": "Buscar canal",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Buscar canal": {
+        "main": [
+          [
+            {
+              "node": "Montar config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "_MEaxD-qYMc",
+    "versionId": "a6f4e217-be0b-4038-860b-53ee7158f137",
+    "createdAt": "2026-06-20T14:08:34.242Z",
+    "updatedAt": "2026-06-20T14:08:34.242Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 03 - Montar Prompt",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "ec64b190-bd8b-426e-9bf0-f6f82d43286f",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\nconst channel = d.channel || {};\nconst basePersonality = d.basePersonality || {};\nconst personality = channel.useSharedPersonality ? basePersonality : (channel.personality || basePersonality);\n\nconst level = (n) => (n < 34 ? 'baixa' : n < 67 ? 'equilibrada' : 'alta');\n\nlet systemPrompt = (d.baseInstructions || '').trim();\nif (channel.instructions?.trim()) {\n  systemPrompt += '\\n\\nInstrucoes do canal:\\n' + channel.instructions.trim();\n}\nsystemPrompt += '\\n\\nDiretrizes de estilo:';\nsystemPrompt += '\\n- Formalidade: ' + level(personality.formality ?? 50);\nsystemPrompt += '\\n- Objetividade: ' + level(personality.objectivity ?? 50);\nsystemPrompt += '\\n- Nivel tecnico: ' + level(personality.technicalLevel ?? 50);\nsystemPrompt += '\\n- Estilo de escrita: ' + (personality.writingStyle || 'equilibrado');\nsystemPrompt += '\\n- Emojis: ' + (personality.emojiUsage || 'as_vezes');\nsystemPrompt += '\\n- Tamanho das respostas: ' + (personality.responseLength || 'media');\n\nconst kc = (d.knowledgeContext || '').trim();\nif (kc) {\n  systemPrompt += '\\n\\n## Base de conhecimento relevante\\n' + kc;\n  systemPrompt += '\\n\\nUse apenas as informacoes acima quando pertinentes. Se nao souber, diga que nao tem a informacao.';\n}\n\nconst temperature = (personality.temperature ?? 50) / 100;\nconst max_tokens = { curta: 256, media: 512, longa: 1024 }[personality.responseLength] || 512;\nconst top_p = 0.5 + ((personality.creativity ?? 50) / 200);\n\nreturn [{ json: { systemPrompt, personality, llmParams: { temperature, max_tokens, top_p } } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "08fc516d-45ce-4bb9-8437-bc2783be4f83",
+        "name": "Montar prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          280,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Montar prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "so_Zdf9X7dQ",
+    "versionId": "52c1f38f-3454-4f0d-89b7-2ddd6c40644b",
+    "createdAt": "2026-06-20T14:08:34.242Z",
+    "updatedAt": "2026-06-20T14:08:34.242Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 04 - Buscar Conhecimento",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "36bed991-2f13-45eb-844b-5b1d1c1f75e2",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cfcb5787-da0b-4b8d-9b7f-35121ef55bac",
+                "leftValue": "={{ $json.useSharedKnowledgeBase }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "4901a879-7bc7-43d8-bd0c-931c7782dcc7",
+        "name": "RAG habilitado?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/embeddings",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: \"text-embedding-3-small\", input: $(\"Execute Workflow Trigger\").item.json.query }) }}"
+        },
+        "id": "32335802-1222-4f2a-85b7-8f2e07f61f5e",
+        "name": "Embedding query",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          520,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $('Execute Workflow Trigger').item.json;\nconst embedding = $input.first().json.data[0].embedding;\nconst vectorLiteral = '[' + embedding.join(',') + ']';\nconst topK = input.topK || 5;\n\nreturn [{ json: { ...input, vectorLiteral, topK } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "d9c8c183-dc81-436b-b9f1-ee8b52800cf7",
+        "name": "Busca vetorial",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT content, file_id, chunk_index,\n  1 - (embedding <=> $1::vector) AS score\nFROM knowledge_chunks\nWHERE agent_id = $2::uuid\nORDER BY embedding <=> $1::vector\nLIMIT $3;",
+          "options": {
+            "queryReplacement": "={{ $json.vectorLiteral }},{{ $json.agentId }},{{ $json.topK }}"
+          }
+        },
+        "id": "3507997f-1f97-4b8c-aa7e-e8ae28412314",
+        "name": "PostgreSQL RAG",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.4,
+        "position": [
+          1040,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const rows = $input.all().map(i => i.json);\nconst hits = rows.filter(r => r.content).map(r => ({\n  content: r.content,\n  score: Number(r.score),\n  fileId: r.file_id,\n  chunkIndex: r.chunk_index,\n})).filter(h => h.score >= 0.7);\n\nconst knowledgeContext = hits.map(h => h.content).join('\\n---\\n');\nreturn [{ json: { hits, knowledgeContext } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "65fece05-2c10-425a-8089-01b0f95a4fc5",
+        "name": "Montar contexto",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { hits: [], knowledgeContext: '' } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "76ed4bed-1a74-4760-88a5-761f3d332c3e",
+        "name": "Sem RAG",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          520,
+          420
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "RAG habilitado?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "RAG habilitado?": {
+        "main": [
+          [
+            {
+              "node": "Embedding query",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Sem RAG",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Embedding query": {
+        "main": [
+          [
+            {
+              "node": "Busca vetorial",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Busca vetorial": {
+        "main": [
+          [
+            {
+              "node": "PostgreSQL RAG",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PostgreSQL RAG": {
+        "main": [
+          [
+            {
+              "node": "Montar contexto",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "nc47MCEDFZ0",
+    "versionId": "cccc4f19-5fa5-4cf1-b6a3-5e1f13731736",
+    "createdAt": "2026-06-20T14:08:34.243Z",
+    "updatedAt": "2026-06-20T14:08:34.243Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 05 - Executar LLM",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "4efb4cbf-23ca-44b8-9ada-3e227297d7b3",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "personal-use-chat",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "ba55fcb9-3f36-4069-8dec-c1fbe46466b2",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          480
+        ],
+        "webhookId": "7c8c6537-cf19-40c2-89aa-547568d32670"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\nconst expected = $env.N8N_WEBHOOK_SECRET || 'dev-n8n-secret';\nif (secret !== expected) return [{ json: { unauthorized: true } }];\nconst body = item.body ?? item;\nreturn [{ json: { unauthorized: false, source: 'webhook', ...body } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "ca700628-612c-487e-9742-e14fae4d5fae",
+        "name": "Auth webhook",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          480
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "f8cb5130-00dc-4aef-a68f-450c2f89ab25",
+                "leftValue": "={{ $json.unauthorized }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "6fab3d9b-f283-4cc0-9b59-d81cb0286470",
+        "name": "Autorizado?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          520,
+          480
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\nconst viaWebhook = item.source === 'webhook';\nconst body = viaWebhook ? item : item;\nconst p = body.personality || {};\nconst messages = [{ role: 'system', content: body.systemPrompt || 'Voce e um assistente util.' }];\n\nfor (const msg of (body.history || [])) {\n  messages.push({ role: msg.role, content: msg.content });\n}\nmessages.push({ role: 'user', content: body.userMessage });\n\nconst temperature = (p.temperature ?? 50) / 100;\nconst max_tokens = { curta: 256, media: 512, longa: 1024 }[p.responseLength] || 512;\n\nreturn [{ json: { viaWebhook, messages, temperature, max_tokens } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "ef5610a0-18ea-4249-8cb3-fc3a93726ed5",
+        "name": "Preparar LLM",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          520,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: \"gpt-4o-mini\", messages: $(\"Preparar LLM\").item.json.messages, temperature: $(\"Preparar LLM\").item.json.temperature, max_tokens: $(\"Preparar LLM\").item.json.max_tokens }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "075d9b5c-0604-48d9-840b-fac69ed92842",
+        "name": "OpenAI Chat",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          760,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const prep = $('Preparar LLM').item.json;\nlet reply = 'Desculpe, nao consegui processar sua mensagem agora. Tente novamente.';\ntry {\n  const choices = $input.first().json.choices;\n  if (choices?.[0]?.message?.content) {\n    reply = choices[0].message.content;\n  }\n} catch {}\nreturn [{ json: { reply } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "1b603c05-6ddd-4321-badc-54efb7948074",
+        "name": "Extrair resposta",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1000,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { reply: $json.reply } }}",
+          "options": {
+            "responseCode": 200
+          }
+        },
+        "id": "fdd6e9e0-ab54-40a2-897a-e5ea87c24094",
+        "name": "Responder OK",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          1240,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { error: \"Unauthorized\" } }}",
+          "options": {
+            "responseCode": 401
+          }
+        },
+        "id": "8e813faa-7a98-45b4-b416-4dd035d48b56",
+        "name": "Responder 401",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          760,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "3aae2493-8b3d-4b12-a5a6-b67af1541e9d",
+                "leftValue": "={{ $('Preparar LLM').item.json.viaWebhook }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "70b0311c-4557-4ef0-ae37-53388f50363b",
+        "name": "Via webhook?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1240,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { reply: $json.reply } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "6b5aed0e-48ce-4e2e-ad4e-27f77efbc3ba",
+        "name": "Retorno sub-workflow",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1480,
+          320
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Preparar LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Auth webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Auth webhook": {
+        "main": [
+          [
+            {
+              "node": "Autorizado?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Autorizado?": {
+        "main": [
+          [
+            {
+              "node": "Responder 401",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Preparar LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Preparar LLM": {
+        "main": [
+          [
+            {
+              "node": "OpenAI Chat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenAI Chat": {
+        "main": [
+          [
+            {
+              "node": "Extrair resposta",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrair resposta": {
+        "main": [
+          [
+            {
+              "node": "Via webhook?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Via webhook?": {
+        "main": [
+          [
+            {
+              "node": "Responder OK",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Retorno sub-workflow",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "HNfG6_5-tcU",
+    "versionId": "b3215cf1-e1a5-4a79-a1fc-c15c9a6e84f4",
+    "createdAt": "2026-06-20T14:08:34.246Z",
+    "updatedAt": "2026-06-20T14:08:34.246Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 06 - Salvar Historico",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "e61785a9-a472-4ee2-aed5-051a72189547",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/conversations/internal' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  agentId: $json.agentId,\n  channel: 'whatsapp',\n  externalId: $json.externalId,\n  contactName: $json.contactName,\n  contactPhone: $json.contactPhone,\n  title: $json.contactName,\n  messages: [\n    { role: 'user', content: $json.userMessage },\n    { role: 'assistant', content: $json.assistantMessage },\n  ],\n}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "eb63d53f-df04-4e1c-a8d8-0cb55f5e2cf1",
+        "name": "Salvar conversa",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          280,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Salvar conversa",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "rsgZX66Iqaw",
+    "versionId": "90f0c0cc-9fb8-4199-b133-b2870c52aa6e",
+    "createdAt": "2026-06-20T14:08:34.248Z",
+    "updatedAt": "2026-06-20T14:08:34.248Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 07 - Processar Arquivo",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "knowledge-file-processing",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "d9c21dca-5077-4b6d-aa31-ad68e7a3f972",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          300
+        ],
+        "webhookId": "33868d57-401b-4f81-86ae-1109703afbcd"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\nconst expected = $env.N8N_WEBHOOK_SECRET || 'dev-n8n-secret';\nif (secret !== expected) throw new Error('Unauthorized');\n\nconst body = item.body ?? item;\nif (!body.fileId || !body.agentId || !body.storageUrl || !body.downloadUrl) {\n  throw new Error('Payload invalido');\n}\nreturn [{ json: body }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "71cae54a-4471-4177-9875-56fd05996b43",
+        "name": "Validar e iniciar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $json.fileId }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ status: \"processing\", progress: 0 }) }}"
+        },
+        "id": "c86c206c-dcff-4018-b105-a5fb876f66a6",
+        "name": "Status processing",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const meta = $('Validar e iniciar').item.json;\nconst downloadUrl = meta.downloadUrl;\nif (!downloadUrl) throw new Error('downloadUrl ausente no payload');\n\nconst response = await fetch(downloadUrl);\nif (!response.ok) throw new Error('Falha ao baixar arquivo do S3: ' + response.status);\nconst buf = Buffer.from(await response.arrayBuffer());\n\nlet text = '';\nif (meta.fileType === 'csv') {\n  text = buf.toString('utf-8');\n} else if (meta.fileType === 'xlsx') {\n  throw new Error('Processamento de XLSX ainda nao implementado no N8N. Use CSV por enquanto.');\n} else {\n  throw new Error('Tipo nao suportado: ' + meta.fileType + '. Use csv ou xlsx.');\n}\n\nconst chunkSize = 3200;\nconst overlap = 320;\nconst chunks = [];\nlet i = 0;\nlet idx = 0;\nwhile (i < text.length) {\n  const slice = text.slice(i, i + chunkSize).trim();\n  if (slice) chunks.push({ content: slice, chunkIndex: idx++ });\n  if (i + chunkSize >= text.length) break;\n  i += chunkSize - overlap;\n}\n\nif (!chunks.length) throw new Error('Nenhum texto extraido do arquivo');\nreturn [{ json: { ...meta, chunks } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "0d59ffb8-7fbd-4e74-9fa1-99c8e53d2434",
+        "name": "Extrair e chunkar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $('Validar e iniciar').item.json.fileId }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ progress: 45 }) }}"
+        },
+        "id": "1e9e0d7e-7541-44b5-984d-56e7c986b25f",
+        "name": "Progress 45",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1040,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const meta = $('Extrair e chunkar').item.json;\nconst apiKey = $env.OPENAI_API_KEY;\nif (!apiKey) throw new Error('OPENAI_API_KEY nao configurada');\n\nconst results = [];\nfor (const chunk of meta.chunks) {\n  const res = await fetch('https://api.openai.com/v1/embeddings', {\n    method: 'POST',\n    headers: {\n      Authorization: 'Bearer ' + apiKey,\n      'Content-Type': 'application/json',\n    },\n    body: JSON.stringify({ model: 'text-embedding-3-small', input: chunk.content }),\n  });\n  const data = await res.json();\n  if (!data.data?.[0]?.embedding) throw new Error('Falha no embedding');\n  results.push({\n    content: chunk.content,\n    chunkIndex: chunk.chunkIndex,\n    embedding: data.data[0].embedding,\n  });\n}\nreturn [{ json: { fileId: meta.fileId, chunks: results } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "747cce53-42df-4b2a-a9ac-ce301fcec638",
+        "name": "Gerar embeddings",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $json.fileId + '/chunks' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ chunks: $json.chunks }) }}"
+        },
+        "id": "9b0961e5-c6b0-4540-8d53-ec8a94fbaca2",
+        "name": "Salvar chunks",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1560,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/knowledge/files/' + $('Gerar embeddings').item.json.fileId }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  status: 'ready',\n  chunks: $('Gerar embeddings').item.json.chunks.length,\n  vectors: $('Gerar embeddings').item.json.chunks.length,\n  indexedAt: new Date().toISOString(),\n}) }}"
+        },
+        "id": "ae61cf74-0c09-4636-9e40-3c3912a42452",
+        "name": "Finalizar ready",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          1820,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Validar e iniciar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validar e iniciar": {
+        "main": [
+          [
+            {
+              "node": "Status processing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Status processing": {
+        "main": [
+          [
+            {
+              "node": "Extrair e chunkar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extrair e chunkar": {
+        "main": [
+          [
+            {
+              "node": "Progress 45",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Progress 45": {
+        "main": [
+          [
+            {
+              "node": "Gerar embeddings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gerar embeddings": {
+        "main": [
+          [
+            {
+              "node": "Salvar chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Salvar chunks": {
+        "main": [
+          [
+            {
+              "node": "Finalizar ready",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "AtxnAldTA6s",
+    "versionId": "b1a64510-02fe-4f2b-a52a-3409ae86ea68",
+    "createdAt": "2026-06-20T14:08:34.249Z",
+    "updatedAt": "2026-06-20T14:08:34.249Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 08 - Eventos WhatsApp",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "whatsapp-events",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "id": "14257b54-e86b-40dc-a93d-9f895c4eb62e",
+        "name": "Webhook Evolution",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          300
+        ],
+        "webhookId": "82763adc-9bd4-4980-990c-f4e5968a6b8c"
+      },
+      {
+        "parameters": {
+          "jsCode": "const p = $input.first().json;\nconst instanceName = p.instance || p.instanceName || p.data?.instance;\nconst event = (p.event || p.data?.event || '').toLowerCase();\n\nlet connectionStatus = 'disconnected';\nlet qrCode = null;\nlet phoneNumber = null;\nlet connectedAt = null;\n\nif (event.includes('qrcode')) {\n  connectionStatus = 'connecting';\n  qrCode = p.data?.qrcode?.base64 || p.qrcode || p.data?.qrcode || null;\n} else if (event.includes('open') || p.data?.state === 'open') {\n  connectionStatus = 'connected';\n  phoneNumber = p.data?.phoneNumber || p.data?.wid?.user || null;\n  connectedAt = new Date().toISOString();\n} else if (event.includes('close')) {\n  connectionStatus = 'disconnected';\n} else if (event.includes('connecting')) {\n  connectionStatus = 'reconnecting';\n}\n\nif (!instanceName || !String(instanceName).startsWith('flowassist-')) {\n  return [{ json: { skip: true } }];\n}\n\nreturn [{ json: { skip: false, instanceName, connectionStatus, qrCode, phoneNumber, connectedAt } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "40cbe1e5-ba40-40dc-9a4c-f1dcd895c184",
+        "name": "Normalizar evento",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          280,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "851b4057-eb4b-4826-99ac-2da8a80d65a4",
+                "leftValue": "={{ $json.skip }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "c5e296fd-221c-4e2c-b04a-ad6d72ca0813",
+        "name": "Instancia valida?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ ($env.API_URL || 'http://localhost:3000') + '/api/webhooks/whatsapp-status' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-webhook-secret",
+                "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ instanceName: $json.instanceName, connectionStatus: $json.connectionStatus, phoneNumber: $json.phoneNumber, connectedAt: $json.connectedAt, qrCode: $json.qrCode }) }}"
+        },
+        "id": "688661ab-7910-4785-9496-e8b7d881f3bb",
+        "name": "Atualizar backend",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          760,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ok: true } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "bab921db-fcec-4432-9c66-2197373dcac8",
+        "name": "OK",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1000,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ok: true, skipped: true } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "d5c177a5-d342-4f8a-94e4-e10ab17082be",
+        "name": "Ignorar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          760,
+          420
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook Evolution": {
+        "main": [
+          [
+            {
+              "node": "Normalizar evento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalizar evento": {
+        "main": [
+          [
+            {
+              "node": "Instancia valida?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Instancia valida?": {
+        "main": [
+          [
+            {
+              "node": "Atualizar backend",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Ignorar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Atualizar backend": {
+        "main": [
+          [
+            {
+              "node": "OK",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "dHp098MV4dQ",
+    "versionId": "48531f8f-f828-4374-a1d7-5771c5674212",
+    "createdAt": "2026-06-20T14:08:34.251Z",
+    "updatedAt": "2026-06-20T14:08:34.251Z",
+    "triggerCount": 0
+  },
+  {
+    "name": "FlowAssist 01 - Receber WhatsApp",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "whatsapp-incoming",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "id": "4fbc3806-d148-4b74-bcda-c18e189f07a4",
+        "name": "Webhook Evolution",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          300
+        ],
+        "webhookId": "b3420f9b-4b08-4035-a585-187ac42b2ae9"
+      },
+      {
+        "parameters": {
+          "jsCode": "const p = $input.first().json;\nif (p.data?.key?.fromMe === true) return [{ json: { skip: true } }];\n\nconst instanceName = p.instance || p.instanceName;\nconst remoteJid = p.data?.key?.remoteJid || '';\nconst contactName = p.data?.pushName || 'Contato';\nconst msg = p.data?.message || {};\nconst message = msg.conversation || msg.extendedTextMessage?.text || '';\n\nif (!message?.trim() || !instanceName) return [{ json: { skip: true } }];\n\nconst suffix = String(instanceName).replace('flowassist-', '');\nreturn [{\n  json: {\n    skip: false,\n    instanceName,\n    agentIdSuffix: suffix,\n    contactPhone: remoteJid,\n    contactName,\n    externalId: remoteJid,\n    message: message.trim(),\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "76900ba8-ea56-4fc4-8e0a-6a97dcc1e030",
+        "name": "Parse mensagem",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "fc339700-d39d-4360-974a-74be1035f0b3",
+                "leftValue": "={{ $json.skip }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "114b4261-3230-4f4e-8471-775d94248fc5",
+        "name": "Mensagem valida?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          520,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT a.id AS agent_id FROM agents a\nJOIN whatsapp_connections w ON w.agent_id = a.id\nWHERE w.instance_name = $1 OR a.id::text LIKE $2 || '%'\nLIMIT 1;",
+          "options": {
+            "queryReplacement": "={{ $('Parse mensagem').item.json.instanceName }},{{ $('Parse mensagem').item.json.agentIdSuffix }}"
+          }
+        },
+        "id": "67b25b5b-00d4-46b4-bc81-2218be971a13",
+        "name": "Resolver agentId",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.4,
+        "position": [
+          760,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const parse = $('Parse mensagem').item.json;\nconst row = $input.first().json;\nif (!row.agent_id) throw new Error('Agente nao encontrado para ' + parse.instanceName);\nreturn [{ json: { agentId: row.agent_id, channelId: 'whatsapp', ...parse } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "3a962012-f5c8-4449-9060-db02952b6638",
+        "name": "Prep agente",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1000,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FlowAssist 02 - Buscar Agente",
+            "mode": "name"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "agentId": "={{ $json.agentId }}",
+              "channelId": "={{ $json.channelId }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "e0182109-346b-4ef7-b358-656864f93a6f",
+        "name": "Chamar 02 - Buscar Agente",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.1,
+        "position": [
+          1240,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "45b6d06e-f501-4169-a663-24abd8083a6f",
+                "leftValue": "={{ $json.channel.enabled }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "579be656-c9ff-425b-ac43-99ab17a633fc",
+        "name": "Canal ativo?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1480,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const cfg = $input.first().json;\nconst parse = $('Prep agente').item.json;\nreturn [{\n  json: {\n    agentId: cfg.agentId,\n    query: parse.message,\n    topK: 5,\n    useSharedKnowledgeBase: cfg.channel.useSharedKnowledgeBase,\n    cfg,\n    parse,\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "eef94f59-6192-4289-a76d-e5a3f39362e2",
+        "name": "Prep RAG",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1720,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FlowAssist 04 - Buscar Conhecimento",
+            "mode": "name"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "agentId": "={{ $json.agentId }}",
+              "query": "={{ $json.query }}",
+              "topK": "={{ $json.topK }}",
+              "useSharedKnowledgeBase": "={{ $json.useSharedKnowledgeBase }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "b08fbe52-4f7d-4965-8e11-b47e00ba6963",
+        "name": "Chamar 04 - Buscar Conhecimento",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.1,
+        "position": [
+          1960,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const rag = $input.first().json;\nconst prep = $('Prep RAG').item.json;\nreturn [{\n  json: {\n    agentName: prep.cfg.agentName,\n    baseInstructions: prep.cfg.baseInstructions,\n    basePersonality: prep.cfg.basePersonality,\n    channel: prep.cfg.channel,\n    knowledgeContext: rag.knowledgeContext || '',\n    parse: prep.parse,\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "e117e97f-5d7a-4edc-b5ed-e17eaca0ac33",
+        "name": "Prep prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2200,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FlowAssist 03 - Montar Prompt",
+            "mode": "name"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "agentName": "={{ $json.agentName }}",
+              "baseInstructions": "={{ $json.baseInstructions }}",
+              "basePersonality": "={{ $json.basePersonality }}",
+              "channel": "={{ $json.channel }}",
+              "knowledgeContext": "={{ $json.knowledgeContext }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "54e64582-df73-46f3-95d9-c4fb2e27ce3a",
+        "name": "Chamar 03 - Montar Prompt",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.1,
+        "position": [
+          2440,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const prompt = $input.first().json;\nconst parse = $('Prep prompt').item.json.parse;\nreturn [{\n  json: {\n    systemPrompt: prompt.systemPrompt,\n    history: [],\n    userMessage: parse.message,\n    personality: prompt.personality,\n    knowledgeContext: $('Prep prompt').item.json.knowledgeContext || '',\n    parse,\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "014845ea-e103-4891-8eea-49849a5daecc",
+        "name": "Prep LLM",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2680,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FlowAssist 05 - Executar LLM",
+            "mode": "name"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "systemPrompt": "={{ $json.systemPrompt }}",
+              "history": "={{ $json.history }}",
+              "userMessage": "={{ $json.userMessage }}",
+              "personality": "={{ $json.personality }}",
+              "knowledgeContext": "={{ $json.knowledgeContext }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "6b71573a-c5cf-448a-81d7-a03e029f9a27",
+        "name": "Chamar 05 - Executar LLM",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.1,
+        "position": [
+          2920,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ ($env.EVOLUTION_API_URL || 'http://localhost:8080') + '/message/sendText/' + $('Prep agente').item.json.instanceName }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "={{ $env.EVOLUTION_API_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({\n  number: $('Prep agente').item.json.contactPhone.replace('@s.whatsapp.net',''),\n  text: $json.reply || $json.data?.reply || 'Desculpe, nao consegui responder.',\n}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "778a81e2-bf6a-4e7a-a9e9-b0f177efa065",
+        "name": "Enviar WhatsApp",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.1,
+        "position": [
+          3160,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const llm = $('Chamar 05 - Executar LLM').item.json;\nconst prep = $('Prep agente').item.json;\nreturn [{\n  json: {\n    agentId: prep.agentId,\n    contactPhone: prep.contactPhone,\n    contactName: prep.contactName,\n    externalId: prep.externalId,\n    userMessage: prep.message,\n    assistantMessage: llm.reply || '',\n  },\n}];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "b7dd5b5c-930d-45c6-96bc-662631be4868",
+        "name": "Prep historico",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3400,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FlowAssist 06 - Salvar Historico",
+            "mode": "name"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "agentId": "={{ $json.agentId }}",
+              "contactPhone": "={{ $json.contactPhone }}",
+              "contactName": "={{ $json.contactName }}",
+              "externalId": "={{ $json.externalId }}",
+              "userMessage": "={{ $json.userMessage }}",
+              "assistantMessage": "={{ $json.assistantMessage }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "730ad90b-5695-4601-a9fb-4f36e46a0dc3",
+        "name": "Chamar 06 - Salvar Historico",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.1,
+        "position": [
+          3640,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ok: true } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "2a5ca3ee-be86-41d2-8823-13eaec15e46b",
+        "name": "Concluido",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3880,
+          120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ok: true, skipped: true } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "69429deb-e1a0-4003-b6ca-60927bc89a7b",
+        "name": "Ignorar",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          760,
+          420
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: { ok: true, disabled: true } }];",
+          "mode": "runOnceForAllItems"
+        },
+        "id": "54ecf214-b07c-46ab-ba2a-2cfa05380bcd",
+        "name": "Canal desativado",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1720,
+          320
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook Evolution": {
+        "main": [
+          [
+            {
+              "node": "Parse mensagem",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse mensagem": {
+        "main": [
+          [
+            {
+              "node": "Mensagem valida?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mensagem valida?": {
+        "main": [
+          [
+            {
+              "node": "Resolver agentId",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Ignorar",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolver agentId": {
+        "main": [
+          [
+            {
+              "node": "Prep agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prep agente": {
+        "main": [
+          [
+            {
+              "node": "Chamar 02 - Buscar Agente",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chamar 02 - Buscar Agente": {
+        "main": [
+          [
+            {
+              "node": "Canal ativo?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Canal ativo?": {
+        "main": [
+          [
+            {
+              "node": "Prep RAG",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Canal desativado",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prep RAG": {
+        "main": [
+          [
+            {
+              "node": "Chamar 04 - Buscar Conhecimento",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chamar 04 - Buscar Conhecimento": {
+        "main": [
+          [
+            {
+              "node": "Prep prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prep prompt": {
+        "main": [
+          [
+            {
+              "node": "Chamar 03 - Montar Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chamar 03 - Montar Prompt": {
+        "main": [
+          [
+            {
+              "node": "Prep LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prep LLM": {
+        "main": [
+          [
+            {
+              "node": "Chamar 05 - Executar LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chamar 05 - Executar LLM": {
+        "main": [
+          [
+            {
+              "node": "Enviar WhatsApp",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Enviar WhatsApp": {
+        "main": [
+          [
+            {
+              "node": "Prep historico",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prep historico": {
+        "main": [
+          [
+            {
+              "node": "Chamar 06 - Salvar Historico",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chamar 06 - Salvar Historico": {
+        "main": [
+          [
+            {
+              "node": "Concluido",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "tags": [],
+    "id": "xAebhCb8Y7s",
+    "versionId": "3aaa0f92-5e52-491d-9e2d-752eee31b8f7",
+    "createdAt": "2026-06-20T14:08:34.233Z",
+    "updatedAt": "2026-06-20T14:08:34.233Z",
+    "triggerCount": 0
+  }
+]

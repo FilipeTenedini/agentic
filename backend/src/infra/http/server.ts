@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import { corsOrigins } from "../../config/env.js";
 import { apiRouter } from "../../routes.js";
+import { requestLogger } from "../../shared/middlewares/request-logger.middleware.js";
 import { errorHandler, notFoundHandler } from "./errors.js";
 
 /** Cria e configura a instancia do Express com middlewares globais e rotas. */
@@ -16,6 +17,7 @@ export function createServer(): Express {
   );
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
+  app.use(requestLogger);
 
   // Healthcheck simples (util para deploy / docker).
   app.get("/health", (_req, res) => {
