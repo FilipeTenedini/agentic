@@ -1,6 +1,7 @@
 # Workflow 1 — Embed Message
 
-> **Status:** Pendente  
+> **Status:** Concluído  
+> **Doc:** [`documentation/n8n/concluded/embed-message.md`](../documentation/n8n/concluded/embed-message.md)  
 > **Path:** `embed-message`  
 > **Quem chama:** Backend (`embedding.client.ts` → `embedText()`)
 
@@ -146,7 +147,7 @@ curl -X POST "https://SEU-N8N.app.n8n.cloud/webhook/embed-message" \
 
 ## Checklist
 
-- [ ] Workflow **Active**
-- [ ] Ollama local: `cd backend && npm run ollama:setup`
-- [ ] `API_URL` no N8N = URL ngrok do backend (porta 3000)
-- [ ] Resposta com exatamente **768** dimensões
+- [x] Workflow **Active**
+- [x] Ollama local: `cd backend && npm run ollama:setup`
+- [x] `API_URL` no N8N = URL ngrok do backend (porta 3000)
+- [x] Resposta com exatamente **768** dimensões

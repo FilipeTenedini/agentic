@@ -6,11 +6,11 @@
 
 | # | Workflow | Path webhook | Status |
 |---|----------|--------------|--------|
-| 1 | [Embed Message](./01-embed-message.md) | `embed-message` | Pendente |
+| 1 | [Embed Message](./01-embed-message.md) | `embed-message` | **Concluído** — ver [`documentation/n8n/concluded/embed-message.md`](../documentation/n8n/concluded/embed-message.md) |
 | 2 | [File Processor + Embeddings](./02-file-processor-embeddings.md) | `knowledge-file-processing` | **Concluído** — ver [`documentation/n8n/concluded/file-processor.md`](../documentation/n8n/concluded/file-processor.md) |
 | 3 | [Personal Use Chat](./03-personal-use-chat.md) | `personal-use-chat` | Concluído (revisar se necessário) |
 
-**Estamos implementando agora:** **#2 — File Processor com embeddings** (Ollama `nomic-embed-text`, 768 dims).
+**Pipeline RAG + chat:** workflows #1, #2 e #3 ativos com `MOCK_RAG=false` e `MOCK_AI=false`.
 
 ## Variáveis N8N (Settings → Variables)
 
@@ -44,12 +44,12 @@ EMBEDDING_DIMENSIONS=768
 VECTOR_SEARCH_MIN_SCORE=0.5
 ```
 
-## Ordem recomendada
+## Ordem recomendada (setup inicial)
 
 1. Ollama: `cd backend && npm run ollama:setup` + `ngrok http 3000` → `API_URL` no N8N
-2. **#2** File processor com embeddings → re-upload planilha → `ready` + `vectors > 0`
+2. **#2** File processor → re-upload planilha → `ready` + `vectors > 0`
 3. **#1** embed-message → testar curl
-4. **#3** já ativo → teste chat end-to-end
+4. **#3** personal-use-chat → teste chat end-to-end
 
 ## Fluxo completo (chat + RAG)
 
@@ -65,5 +65,6 @@ CADA MENSAGEM:
 
 ## Referências
 
-- File processor MVP (sem embedding): `documentation/n8n/concluded/file-processor.md`
+- Embed message (concluído): `documentation/n8n/concluded/embed-message.md`
+- File processor (concluído): `documentation/n8n/concluded/file-processor.md`
 - Workflows legados: `n8n/00-visao-geral.md`

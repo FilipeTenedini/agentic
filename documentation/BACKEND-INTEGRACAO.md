@@ -228,7 +228,7 @@ Upload (frontend)
   → Frontend reflete status via polling
 ```
 
-**Busca semântica em produção** (requer WF `embed-message` para embed da query):
+**Busca semântica em produção** (WF `embed-message` — ver [`embed-message.md`](n8n/concluded/embed-message.md)):
 
 ```sql
 -- pgvector, cosine distance (768 dims)
@@ -420,7 +420,7 @@ systemPrompt =
 | Item | Valor |
 | --- | --- |
 | **Trigger** | Webhook `personal-use-chat` (backend) OU sub-workflow (WhatsApp) |
-| **Entrada** | Ver [seção 7.1](#71-personal-use-chat) |
+| **Entrada** | Ver [seção 7.2](#72-personal-use-chat) |
 | **Saída** | `{ reply: "texto da resposta" }` |
 
 **Nodes sugeridos:**
@@ -748,7 +748,39 @@ Content-Type: application/json
 x-webhook-secret: {N8N_WEBHOOK_SECRET}
 ```
 
-### 7.1 personal-use-chat
+### 7.1 embed-message
+
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `{N8N_URL}/webhook/embed-message` |
+| **Quando** | `MOCK_RAG=false`, agente com embeddings indexados e usuário envia mensagem no chat |
+| **Modo** | Síncrono (Respond to Webhook) |
+
+**Payload enviado pelo backend** (`embedding.client.ts` → `embedText()`):
+
+```json
+{
+  "text": "pergunta do usuário",
+  "model": "nomic-embed-text",
+  "dimensions": 768
+}
+```
+
+**Resposta esperada:**
+
+```json
+{
+  "embedding": [0.012, -0.034, "... 768 floats ..."]
+}
+```
+
+O n8n chama `POST {API_URL}/api/internal/embed` (proxy Ollama). Documentação completa:
+[`documentation/n8n/concluded/embed-message.md`](n8n/concluded/embed-message.md).
+
+---
+
+### 7.2 personal-use-chat
 
 | Campo | Valor |
 | --- | --- |
@@ -790,7 +822,7 @@ x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 ---
 
-### 7.2 knowledge-file-processing
+### 7.3 knowledge-file-processing
 
 | Campo | Valor |
 | --- | --- |
@@ -818,7 +850,7 @@ x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 ---
 
-### 7.3 whatsapp-incoming (sugerido — implementar no N8N)
+### 7.4 whatsapp-incoming (sugerido — implementar no N8N)
 
 | Campo | Valor |
 | --- | --- |
@@ -925,6 +957,7 @@ Para sair do mock mode, altere as flags no `.env` e garanta que os workflows N8N
 
 | Arquivo | Função | Flag | Webhook N8N | O que fazer |
 | --- | --- | --- | --- | --- |
+| `src/infra/integrations/embedding.client.ts` | `embedText()` | `MOCK_RAG` | `embed-message` | WF #1; retornar `{ embedding }` (768d) |
 | `src/infra/integrations/llm.client.ts` | `generateReply()` | `MOCK_AI` | `personal-use-chat` | Criar Workflow 05; retornar `{ reply }` |
 | `src/infra/integrations/n8n.client.ts` | `callN8nWebhook()` | — | (genérico) | Configurar `N8N_URL` e `N8N_WEBHOOK_SECRET` |
 | `src/modules/knowledge/knowledge.service.ts` | `startProcessing()` | `MOCK_RAG` | `knowledge-file-processing` | Criar Workflow 07 |
@@ -1027,6 +1060,7 @@ Para workflows N8N sem JWT de usuário:
 
 | Path | Método | Workflow |
 | --- | --- | --- |
+| `/webhook/embed-message` | POST | 01 |
 | `/webhook/personal-use-chat` | POST | 05 |
 | `/webhook/knowledge-file-processing` | POST | 07 |
 
@@ -1036,7 +1070,7 @@ Para workflows N8N sem JWT de usuário:
 | --- | --- | --- |
 | `/api/knowledge/files/:fileId` | PUT | 07 |
 | `/api/knowledge/files/:fileId/chunks` | POST | 07 |
-| `/api/internal/embed` | POST | 07, embed-message |
+| `/api/internal/embed` | POST | 01, 07 |
 | `/api/conversations/internal` | POST | 06 |
 | `/api/webhooks/whatsapp-status` | PUT | 08 |
 | `/api/webhooks/evolution` | POST | 08 (alternativa direta) |

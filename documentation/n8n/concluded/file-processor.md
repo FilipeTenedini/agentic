@@ -24,7 +24,7 @@ gera **embeddings** por chunk e persiste vetores no PostgreSQL (pgvector).
 
 - Multi-aba em xlsx
 - Upload para S3 (feito pelo backend)
-- Embed da pergunta do chat (workflow separado: `embed-message`)
+- Embed da pergunta do chat: workflow [`embed-message`](embed-message.md)
 
 ---
 
@@ -431,7 +431,7 @@ Após `ready` com `vectors > 0`, o backend usa **pgvector** (cosine distance) em
 
 - Canal `personalUse` habilitado
 - `useSharedKnowledgeBase: true`
-- WF #1 `embed-message` ativo (para busca semântica da pergunta)
+- WF #1 `embed-message` ativo (para busca semântica da pergunta) — ver [`embed-message.md`](embed-message.md)
 
 ---
 
@@ -471,17 +471,17 @@ Após `ready` com `vectors > 0`, o backend usa **pgvector** (cosine distance) em
 - [x] `API_URL` = ngrok porta 3000
 - [x] `N8N_WEBHOOK_SECRET` igual nos dois lados
 - [x] Upload xlsx → `ready` + `vectors > 0`
-- [ ] WF #1 `embed-message` (busca semântica no chat)
+- [x] WF #1 `embed-message` (busca semântica no chat) — ver [`embed-message.md`](embed-message.md)
 - [ ] Error handler (recomendado)
 
 ---
 
-## Próximo workflow
+## Workflow relacionado
 
-**WF #1 — `embed-message`**  
+**WF #1 — `embed-message`** (concluído)  
 Embedda a pergunta do usuário a cada mensagem (mesmo proxy `/api/internal/embed`).
 
-Ver: [`to-implement/01-embed-message.md`](../../../to-implement/01-embed-message.md)
+Ver: [`documentation/n8n/concluded/embed-message.md`](embed-message.md)
 
 ---
 
@@ -518,6 +518,7 @@ sequenceDiagram
 
 ## Referências cruzadas
 
+- Embed message (query RAG): [`documentation/n8n/concluded/embed-message.md`](embed-message.md)
 - Proxy Ollama + ngrok: [`documentation/n8n/ollama-proxy-embeddings.md`](../ollama-proxy-embeddings.md)
 - Integração geral: [`documentation/BACKEND-INTEGRACAO.md`](../../BACKEND-INTEGRACAO.md) (seções 4.7, 6.2, 6.3)
 - Spec de implementação: [`to-implement/02-file-processor-embeddings.md`](../../../to-implement/02-file-processor-embeddings.md)

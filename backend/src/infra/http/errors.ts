@@ -3,6 +3,9 @@ import type { MulterError } from "multer";
 import { ZodError } from "zod";
 import { isProduction } from "../../config/env.js";
 import { ALLOWED_KNOWLEDGE_FILE_MESSAGE } from "../../modules/knowledge/knowledge.constants.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("http");
 
 /**
  * Erro de aplicacao com status HTTP. Use para erros esperados/de negocio
@@ -56,9 +59,9 @@ export function errorHandler(
 
   if (err instanceof AppError) {
     if (!isProduction && err.statusCode >= 400) {
-      console.warn(
-        `[${_req.method} ${_req.originalUrl}] ${err.statusCode} ${err.message}`
-      );
+      log.warn(`${_req.method} ${_req.originalUrl} -> ${err.statusCode}`, {
+        message: err.message,
+      });
     }
     return res.status(err.statusCode).json({
       error: err.message,
@@ -66,7 +69,9 @@ export function errorHandler(
     });
   }
 
-  console.error(`[${_req.method} ${_req.originalUrl}] Erro nao tratado:`, err);
+  log.error(`${_req.method} ${_req.originalUrl} -> erro nao tratado`, {
+    error: err instanceof Error ? err.message : String(err),
+  });
   return res.status(500).json({
     error: "Erro interno do servidor",
     ...(isProduction ? {} : { detail: String(err) }),

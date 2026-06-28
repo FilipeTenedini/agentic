@@ -1,4 +1,7 @@
 import { PrismaClient } from "@prisma/client";
+import { logger } from "../shared/utils/logger.js";
+
+const log = logger.child("db");
 
 /** Singleton do PrismaClient (evita multiplas conexoes em hot-reload). */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -24,10 +27,9 @@ export async function ensureDatabaseReady(): Promise<void> {
   } catch (err) {
     // Em ambientes sem permissao de superuser a extensao pode ja existir ou
     // precisar ser criada manualmente. Nao bloqueia o boot no mock mode.
-    console.warn(
-      "Aviso: nao foi possivel garantir a extensao pgvector automaticamente.",
-      err instanceof Error ? err.message : err
-    );
+    log.warn("Nao foi possivel garantir extensao pgvector automaticamente", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

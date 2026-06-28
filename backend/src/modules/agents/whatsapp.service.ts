@@ -8,6 +8,9 @@ import {
 } from "../../infra/integrations/whatsapp.client.js";
 import { loadAgent } from "./agent.service.js";
 import type { WhatsAppStatusInput } from "./agent.dto.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("whatsapp");
 
 export interface WhatsAppStatusDTO {
   connectionStatus: string;
@@ -49,7 +52,12 @@ function scheduleMockConnected(
         },
       })
       .then(() => logActivity(userId, "whatsapp", "WhatsApp conectado com sucesso"))
-      .catch((err) => console.error("Mock WhatsApp connect falhou:", err));
+      .catch((err) =>
+        log.error("Mock WhatsApp connect falhou", {
+          agentId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
   }, 1500);
 }
 

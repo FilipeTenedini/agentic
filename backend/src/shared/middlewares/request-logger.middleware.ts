@@ -1,5 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import { isProduction } from "../../config/env.js";
+import { logger } from "../utils/logger.js";
+
+const log = logger.child("http");
 
 const SENSITIVE_KEYS = new Set([
   "password",
@@ -49,12 +52,14 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     if (!isProduction) {
       const body = formatBody(req);
       if (body) {
-        console.log(`${line} body=${body}`);
+        log.raw("info", `${line} body=${body}`);
         return;
       }
     }
 
-    console.log(line);
+    if (level === "ERR") log.raw("error", line);
+    else if (level === "WARN") log.raw("warn", line);
+    else log.raw("info", line);
   });
 
   next();

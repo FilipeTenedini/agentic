@@ -1,5 +1,8 @@
 import "dotenv/config";
 import { z } from "zod";
+import { logger } from "../shared/utils/logger.js";
+
+const log = logger.child("env");
 
 /**
  * Validacao centralizada das variaveis de ambiente. Falha cedo (no boot) se
@@ -60,8 +63,9 @@ const envSchema = z.object({
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-  console.error("Variaveis de ambiente invalidas:");
-  console.error(parsed.error.flatten().fieldErrors);
+  log.error("Variaveis de ambiente invalidas", {
+    errors: parsed.error.flatten().fieldErrors,
+  });
   process.exit(1);
 }
 

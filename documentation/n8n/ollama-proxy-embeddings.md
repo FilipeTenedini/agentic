@@ -55,6 +55,7 @@ curl https://SUA-URL.ngrok-free.dev/api/internal/embed \
 ## Referências
 
 - Spec WF #2 (implementação): [`to-implement/02-file-processor-embeddings.md`](../../to-implement/02-file-processor-embeddings.md)
-- **Doc concluída:** [`documentation/n8n/concluded/file-processor.md`](../concluded/file-processor.md)
+- **Doc concluída WF #2:** [`documentation/n8n/concluded/file-processor.md`](concluded/file-processor.md)
 - Spec WF #1: [`to-implement/01-embed-message.md`](../../to-implement/01-embed-message.md)
+- **Doc concluída WF #1:** [`documentation/n8n/concluded/embed-message.md`](concluded/embed-message.md)
 - Integração: [`BACKEND-INTEGRACAO.md`](../BACKEND-INTEGRACAO.md) seção 6.3

@@ -1,6 +1,9 @@
 import { env } from "../../config/env.js";
 import { callN8nWebhook } from "./n8n.client.js";
 import type { AgentPersonality } from "../../shared/domain/personality.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("llm");
 
 export interface LlmMessage {
   role: "user" | "assistant";
@@ -35,10 +38,18 @@ export async function generateReply(
   params: GenerateReplyParams
 ): Promise<string> {
   if (env.MOCK_AI) {
+    log.info("Gerando resposta mock (MOCK_AI=true)");
     const reply = MOCK_REPLIES[Math.floor(Math.random() * MOCK_REPLIES.length)];
     await new Promise((resolve) => setTimeout(resolve, 600));
     return reply;
   }
+
+  const knowledgeChars = params.knowledgeContext?.length ?? 0;
+  log.info("Gerando resposta via N8N personal-use-chat", {
+    historyMessages: params.history.length,
+    knowledgeContextChars: knowledgeChars,
+    userMessageLength: params.userMessage.length,
+  });
 
   const result = await callN8nWebhook<{ reply?: string }>({
     path: "personal-use-chat",
@@ -52,8 +63,10 @@ export async function generateReply(
   });
 
   if (!result.reply?.trim()) {
+    log.error("N8N personal-use-chat respondeu sem campo reply");
     throw new Error("N8N respondeu sem o campo reply");
   }
 
+  log.info("Resposta LLM recebida", { replyLength: result.reply.length });
   return result.reply;
 }

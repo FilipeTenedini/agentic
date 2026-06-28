@@ -1,5 +1,8 @@
 import { env } from "../../config/env.js";
 import { AppError } from "../../infra/http/errors.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("ollama");
 
 export interface OllamaEmbedResponse {
   model: string;
@@ -13,6 +16,12 @@ export async function createEmbedding(
 ): Promise<OllamaEmbedResponse> {
   const base = env.OLLAMA_URL.replace(/\/$/, "");
   let response: Response;
+
+  log.debug("Chamando Ollama embed", {
+    model,
+    textLength: input.length,
+    url: `${base}/api/embed`,
+  });
 
   try {
     response = await fetch(`${base}/api/embed`, {
@@ -61,5 +70,6 @@ export async function createEmbedding(
     );
   }
 
+  log.debug("Embedding Ollama OK", { dimensions: vector.length });
   return parsed;
 }

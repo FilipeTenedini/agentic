@@ -5,6 +5,7 @@ import { logActivity } from "../activities/activity.service.js";
 import { loadAgent, getAgentId } from "../agents/agent.service.js";
 import { searchByAgent } from "../knowledge/knowledge.service.js";
 import { buildSystemPrompt, resolvePersonality } from "./chat.prompt.js";
+import { logger } from "../../shared/utils/logger.js";
 import {
   toConversationDTO,
   toMessageDTO,
@@ -13,6 +14,7 @@ import {
 } from "./chat.mapper.js";
 import type { InternalConversationInput } from "./chat.dto.js";
 
+const log = logger.child("chat");
 const HISTORY_LIMIT = 12;
 
 function summarize(content: string): string {
@@ -96,8 +98,14 @@ export async function sendMessage(
   conversationId: string,
   content: string
 ): Promise<{ userMessage: MessageDTO; assistantMessage: MessageDTO }> {
+  const start = Date.now();
   const conversation = await findOwnedConversation(userId, conversationId);
   const trimmed = content.trim();
+
+  log.info("Nova mensagem do usuario", {
+    conversationId,
+    contentLength: trimmed.length,
+  });
 
   const userMessage = await prisma.message.create({
     data: { conversationId, role: "user", content: trimmed },
@@ -123,8 +131,16 @@ export async function sendMessage(
   const knowledgeBaseEnabled = personalChannel?.useSharedKnowledgeBase ?? true;
   let knowledgeContext = "";
   if (knowledgeBaseEnabled) {
+    log.info("Buscando contexto RAG", { agentId: agent.id, topK: 5 });
     const hits = await searchByAgent(agent.id, trimmed, 5);
     knowledgeContext = hits.map((h) => h.content).join("\n---\n");
+    log.info("RAG concluido", {
+      hits: hits.length,
+      contextChars: knowledgeContext.length,
+      scores: hits.map((h) => Number(h.score.toFixed(3))),
+    });
+  } else {
+    log.debug("Base de conhecimento desabilitada para este canal");
   }
 
   const history = await prisma.message.findMany({
@@ -163,6 +179,12 @@ export async function sendMessage(
       lastMessageAt: new Date(),
       messageCount: { increment: 1 },
     },
+  });
+
+  log.info("Mensagem processada com sucesso", {
+    conversationId,
+    durationMs: Date.now() - start,
+    replyLength: replyText.length,
   });
 
   return {

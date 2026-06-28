@@ -18,6 +18,9 @@ import {
   type KnowledgeFileDTO,
 } from "./knowledge.mapper.js";
 import type { ChunksInput, FileStatusInput } from "./knowledge.dto.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("knowledge");
 
 export async function listFiles(userId: string): Promise<KnowledgeFileDTO[]> {
   const agentId = await getAgentId(userId);
@@ -69,6 +72,11 @@ export async function addFile(
   );
 
   startProcessing(file.id, agentId, stored.storageUrl, file.type);
+  log.info("Arquivo adicionado e processamento iniciado", {
+    fileId: file.id,
+    name: upload.originalname,
+    mockRag: env.MOCK_RAG,
+  });
   return toKnowledgeFileDTO(file);
 }
 
@@ -117,14 +125,15 @@ function startProcessing(
     void (async () => {
       const downloadUrl = storageUrl
         ? await getSignedDownloadUrl(storageUrl).catch((err) => {
-            console.error(
-              `Falha ao gerar URL de download para ${fileId}:`,
-              err
-            );
+            log.error("Falha ao gerar URL de download", {
+              fileId,
+              error: err instanceof Error ? err.message : String(err),
+            });
             return null;
           })
         : null;
 
+      log.info("Disparando workflow knowledge-file-processing", { fileId, agentId });
       triggerN8nWebhook({
         path: "knowledge-file-processing",
         payload: {
@@ -298,13 +307,34 @@ export async function searchByAgent(
   if (hasVectors && !env.MOCK_RAG) {
     try {
       const vectorHits = await searchByAgentVector(agentId, query, topK);
-      if (vectorHits.length > 0) return vectorHits;
+      if (vectorHits.length > 0) {
+        log.info("Busca vetorial retornou hits", {
+          agentId,
+          hits: vectorHits.length,
+          topScore: Number(vectorHits[0]?.score.toFixed(3)),
+        });
+        return vectorHits;
+      }
+      log.info("Busca vetorial sem hits acima do score minimo; tentando keywords", {
+        agentId,
+        minScore: env.VECTOR_SEARCH_MIN_SCORE,
+      });
     } catch (err) {
-      console.error("Busca vetorial falhou; usando fallback textual:", err);
+      log.warn("Busca vetorial falhou; usando fallback textual", {
+        agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  return searchByAgentKeywords(agentId, query, topK);
+  const keywordHits = await searchByAgentKeywords(agentId, query, topK);
+  log.info("Busca por palavras-chave", {
+    agentId,
+    hits: keywordHits.length,
+    hasVectors,
+    mockRag: env.MOCK_RAG,
+  });
+  return keywordHits;
 }
 
 async function agentHasEmbeddings(agentId: string): Promise<boolean> {
@@ -418,6 +448,15 @@ export async function updateFileStatus(
         : {}),
     },
   });
+
+  log.info("Status do arquivo atualizado (callback N8N)", {
+    fileId,
+    status: input.status,
+    progress: input.progress,
+    chunks: input.chunks,
+    vectors: input.vectors,
+  });
+
   return toKnowledgeFileDTO(updated);
 }
 
@@ -460,6 +499,12 @@ export async function saveChunks(
   }
 
   const vectors = input.chunks.filter((c) => c.embedding?.length).length;
+
+  log.info("Chunks salvos (callback N8N)", {
+    fileId,
+    saved: input.chunks.length,
+    vectors,
+  });
 
   return { saved: input.chunks.length, vectors };
 }

@@ -1,4 +1,7 @@
 import { prisma } from "../../infra/prisma.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("activity");
 
 export type ActivityType =
   | "whatsapp"
@@ -26,7 +29,9 @@ export async function logActivity(
   try {
     await prisma.activity.create({ data: { userId, type, description } });
   } catch (err) {
-    console.error("Falha ao registrar atividade:", err);
+    log.error("Falha ao registrar atividade", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

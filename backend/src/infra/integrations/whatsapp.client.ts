@@ -1,4 +1,7 @@
 import { env } from "../../config/env.js";
+import { logger } from "../../shared/utils/logger.js";
+
+const log = logger.child("whatsapp");
 
 /**
  * Cliente da Evolution API (WhatsApp).
@@ -63,5 +66,10 @@ export async function deleteWhatsAppInstance(
       method: "DELETE",
       headers: { apikey: env.EVOLUTION_API_KEY },
     }
-  ).catch((err) => console.error("Falha ao remover instancia WhatsApp:", err));
+  ).catch((err) =>
+    log.error("Falha ao remover instancia WhatsApp", {
+      instanceName,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
 }
