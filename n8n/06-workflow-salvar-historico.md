@@ -54,7 +54,7 @@ Resposta do backend (repassar ou ignorar):
 POST {API_URL}/api/conversations/internal
 Headers:
   Content-Type: application/json
-  x-webhook-secret: {WEBHOOK_SECRET}
+  x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 Body:
 {

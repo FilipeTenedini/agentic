@@ -23,8 +23,11 @@ export function buildSystemPrompt(params: {
   channelId: "whatsapp" | "personalUse";
   personality: AgentPersonality;
   knowledgeContext?: string;
+  /** Quando true, o canal usa a base compartilhada (RAG tentado nesta mensagem). */
+  knowledgeBaseEnabled?: boolean;
 }): string {
-  const { agent, channelId, personality, knowledgeContext } = params;
+  const { agent, channelId, personality, knowledgeContext, knowledgeBaseEnabled } =
+    params;
   const channel = agent.channels.find((c) => c.channelId === channelId);
 
   const parts: string[] = [];
@@ -40,7 +43,11 @@ export function buildSystemPrompt(params: {
 
   if (knowledgeContext && knowledgeContext.trim()) {
     parts.push(
-      `Use as informacoes da base de conhecimento abaixo quando relevante:\n${knowledgeContext.trim()}`
+      `Use APENAS as informacoes da base de conhecimento abaixo para responder sobre fatos, dados e politicas. Se a resposta nao estiver nos trechos, diga que nao encontrou nos arquivos indexados.\n\n${knowledgeContext.trim()}`
+    );
+  } else if (knowledgeBaseEnabled) {
+    parts.push(
+      "Nenhum trecho relevante foi recuperado da base de conhecimento para esta pergunta. Nao invente dados, numeros, politicas ou conteudo tecnico. Informe que nao encontrou essa informacao nos arquivos disponiveis e ofereca ajuda de outra forma."
     );
   }
 

@@ -45,8 +45,7 @@ Importe via **Import from File** nesta ordem:
 
 ```
 API_URL=http://localhost:3000
-WEBHOOK_SECRET=dev-webhook-secret
-N8N_WEBHOOK_SECRET=dev-n8n-secret
+N8N_WEBHOOK_SECRET=dev-webhook-secret
 OPENAI_API_KEY=sk-...
 EVOLUTION_API_URL=http://localhost:8080
 EVOLUTION_API_KEY=...

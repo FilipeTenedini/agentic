@@ -120,8 +120,9 @@ export async function sendMessage(
   const personalChannel = agent.channels.find((c) => c.channelId === "personalUse");
   const personality = resolvePersonality(agent, "personalUse");
 
+  const knowledgeBaseEnabled = personalChannel?.useSharedKnowledgeBase ?? true;
   let knowledgeContext = "";
-  if (personalChannel?.useSharedKnowledgeBase) {
+  if (knowledgeBaseEnabled) {
     const hits = await searchByAgent(agent.id, trimmed, 5);
     knowledgeContext = hits.map((h) => h.content).join("\n---\n");
   }
@@ -141,9 +142,8 @@ export async function sendMessage(
     channelId: "personalUse",
     personality,
     knowledgeContext,
+    knowledgeBaseEnabled,
   });
-
-  console.log("systemPrompt", systemPrompt);
 
   const replyText = await generateReply({
     systemPrompt,

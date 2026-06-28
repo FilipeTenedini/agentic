@@ -3,6 +3,10 @@ import { env } from "../../config/env.js";
 import { NotFound, BadRequest } from "../../infra/http/errors.js";
 import { saveFile, deleteFile, getSignedDownloadUrl } from "../../infra/integrations/storage.js";
 import { triggerN8nWebhook } from "../../infra/integrations/n8n.client.js";
+import {
+  embedText,
+  toVectorLiteral,
+} from "../../infra/integrations/embedding.client.js";
 import { logActivity } from "../activities/activity.service.js";
 import { getAgentId } from "../agents/agent.service.js";
 import {
@@ -123,7 +127,15 @@ function startProcessing(
 
       triggerN8nWebhook({
         path: "knowledge-file-processing",
-        payload: { fileId, agentId, storageUrl, downloadUrl, fileType },
+        payload: {
+          fileId,
+          agentId,
+          storageUrl,
+          downloadUrl,
+          fileType,
+          embeddingModel: env.EMBEDDING_MODEL,
+          embeddingDimensions: env.EMBEDDING_DIMENSIONS,
+        },
       });
     })();
     return;
@@ -214,28 +226,165 @@ export interface SearchHit {
   chunkIndex: number;
 }
 
+const SEARCH_STOPWORDS = new Set([
+  "a",
+  "o",
+  "e",
+  "de",
+  "da",
+  "do",
+  "em",
+  "um",
+  "uma",
+  "uns",
+  "umas",
+  "os",
+  "as",
+  "que",
+  "por",
+  "para",
+  "com",
+  "se",
+  "na",
+  "no",
+  "nas",
+  "nos",
+  "sobre",
+  "voce",
+  "você",
+  "tem",
+  "algum",
+  "alguma",
+  "conhecimento",
+  "especifico",
+  "específico",
+  "isso",
+  "essa",
+  "esse",
+  "aqui",
+  "ola",
+  "oi",
+  "boa",
+  "dia",
+  "tarde",
+  "noite",
+]);
+
+/** Extrai termos buscaveis da pergunta (evita ILIKE na frase inteira). */
+function extractSearchTerms(query: string): string[] {
+  const normalized = query
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+
+  const words = normalized.split(/[^a-z0-9]+/i).filter(Boolean);
+  const terms = words.filter(
+    (w) => w.length >= 3 && !SEARCH_STOPWORDS.has(w)
+  );
+
+  return [...new Set(terms)];
+}
+
 /**
- * Busca trechos relevantes na base. No mock faz match textual simples (ILIKE).
- * Em producao, troca para busca vetorial via pgvector (<-> / cosine).
+ * Busca trechos relevantes: pgvector quando ha embeddings indexados;
+ * fallback para busca por palavras-chave (ILIKE).
  */
 export async function searchByAgent(
   agentId: string,
   query: string,
   topK: number
 ): Promise<SearchHit[]> {
+  const hasVectors = await agentHasEmbeddings(agentId);
+  if (hasVectors && !env.MOCK_RAG) {
+    try {
+      const vectorHits = await searchByAgentVector(agentId, query, topK);
+      if (vectorHits.length > 0) return vectorHits;
+    } catch (err) {
+      console.error("Busca vetorial falhou; usando fallback textual:", err);
+    }
+  }
+
+  return searchByAgentKeywords(agentId, query, topK);
+}
+
+async function agentHasEmbeddings(agentId: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<[{ count: number }]>(
+    `SELECT COUNT(*)::int AS count FROM knowledge_chunks
+     WHERE agent_id = $1 AND embedding IS NOT NULL`,
+    agentId
+  );
+  return (rows[0]?.count ?? 0) > 0;
+}
+
+async function searchByAgentVector(
+  agentId: string,
+  query: string,
+  topK: number
+): Promise<SearchHit[]> {
+  const queryEmbedding = await embedText(query);
+  const vectorLiteral = toVectorLiteral(queryEmbedding);
+
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{
+      content: string;
+      file_id: string;
+      chunk_index: number;
+      score: number;
+    }>
+  >(
+    `SELECT content, file_id, chunk_index,
+            1 - (embedding <=> $1::vector) AS score
+     FROM knowledge_chunks
+     WHERE agent_id = $2 AND embedding IS NOT NULL
+     ORDER BY embedding <=> $1::vector
+     LIMIT $3`,
+    vectorLiteral,
+    agentId,
+    topK
+  );
+
+  return rows
+    .filter((r) => r.score >= env.VECTOR_SEARCH_MIN_SCORE)
+    .map((r) => ({
+      content: r.content,
+      score: r.score,
+      fileId: r.file_id,
+      chunkIndex: r.chunk_index,
+    }));
+}
+
+async function searchByAgentKeywords(
+  agentId: string,
+  query: string,
+  topK: number
+): Promise<SearchHit[]> {
+  const terms = extractSearchTerms(query);
+  if (terms.length === 0) return [];
+
   const chunks = await prisma.knowledgeChunk.findMany({
     where: {
       agentId,
-      content: { contains: query, mode: "insensitive" },
+      OR: terms.map((term) => ({
+        content: { contains: term, mode: "insensitive" as const },
+      })),
     },
-    take: topK,
+    take: topK * 4,
   });
 
-  return chunks.map((c) => ({
-    content: c.content,
-    score: 1,
-    fileId: c.fileId,
-    chunkIndex: c.chunkIndex,
+  const ranked = chunks
+    .map((c) => {
+      const lower = c.content.toLowerCase();
+      const matched = terms.filter((t) => lower.includes(t)).length;
+      return { chunk: c, score: matched / terms.length };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+
+  return ranked.map(({ chunk, score }) => ({
+    content: chunk.content,
+    score,
+    fileId: chunk.fileId,
+    chunkIndex: chunk.chunkIndex,
   }));
 }
 
@@ -276,12 +425,21 @@ export async function updateFileStatus(
 export async function saveChunks(
   fileId: string,
   input: ChunksInput
-): Promise<{ saved: number }> {
+): Promise<{ saved: number; vectors: number }> {
   const file = await prisma.knowledgeFile.findUnique({ where: { id: fileId } });
   if (!file) throw NotFound("Arquivo nao encontrado");
 
-  // Embeddings (vector) sao gravados via SQL bruto quando presentes.
+  const expectedDims = env.EMBEDDING_DIMENSIONS;
+
+  await prisma.knowledgeChunk.deleteMany({ where: { fileId } });
+
   for (const chunk of input.chunks) {
+    if (chunk.embedding && chunk.embedding.length !== expectedDims) {
+      throw BadRequest(
+        `Chunk ${chunk.chunkIndex}: embedding com ${chunk.embedding.length} dims; esperado ${expectedDims}`
+      );
+    }
+
     const created = await prisma.knowledgeChunk.create({
       data: {
         fileId,
@@ -290,8 +448,9 @@ export async function saveChunks(
         chunkIndex: chunk.chunkIndex,
       },
     });
+
     if (chunk.embedding && chunk.embedding.length > 0) {
-      const vectorLiteral = `[${chunk.embedding.join(",")}]`;
+      const vectorLiteral = toVectorLiteral(chunk.embedding);
       await prisma.$executeRawUnsafe(
         `UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
         vectorLiteral,
@@ -300,5 +459,7 @@ export async function saveChunks(
     }
   }
 
-  return { saved: input.chunks.length };
+  const vectors = input.chunks.filter((c) => c.embedding?.length).length;
+
+  return { saved: input.chunks.length, vectors };
 }

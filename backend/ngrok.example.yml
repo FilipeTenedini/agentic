@@ -1,0 +1,14 @@
+# Tuneis do FlowAssist. O authtoken vem de ~/.config/ngrok/ngrok.yml (ngrok config add-authtoken).
+# Um unico agente expoe backend + Ollama ao N8N Cloud.
+#
+#   cp ngrok.example.yml ngrok.yml
+#   NGROK_MODE=all npm run ollama:tunnel
+#
+version: "3"
+tunnels:
+  backend:
+    addr: 3000
+    proto: http
+  ollama:
+    addr: 11434
+    proto: http

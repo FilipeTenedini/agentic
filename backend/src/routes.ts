@@ -9,6 +9,7 @@ import {
 } from "./modules/subscriptions/subscription.routes.js";
 import { activityRouter } from "./modules/activities/activity.routes.js";
 import { webhookRouter } from "./modules/webhooks/webhook.routes.js";
+import { internalRouter } from "./modules/internal/internal.routes.js";
 
 /** Agrega todas as rotas da API sob /api. */
 export const apiRouter = Router();
@@ -21,3 +22,4 @@ apiRouter.use("/subscription", subscriptionRouter);
 apiRouter.use("/plans", planRouter);
 apiRouter.use("/activities", activityRouter);
 apiRouter.use("/webhooks", webhookRouter);
+apiRouter.use("/internal", internalRouter);

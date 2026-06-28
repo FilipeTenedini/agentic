@@ -19,9 +19,6 @@ export async function callN8nWebhook<T = unknown>({
   payload,
 }: N8nCallOptions): Promise<T> {
   const url = `${env.N8N_URL}/${path}`;
-  console.log("url", url);
-  console.log("payload", payload);
-  console.log("env.N8N_WEBHOOK_SECRET", env.N8N_WEBHOOK_SECRET);
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -31,12 +28,23 @@ export async function callN8nWebhook<T = unknown>({
     body: JSON.stringify(payload),
   });
 
+  const text = await response.text().catch(() => "");
+
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
     throw new Error(`N8N respondeu ${response.status}: ${text}`);
   }
 
-  return (await response.json()) as T;
+  if (!text.trim()) {
+    throw new Error(
+      "N8N respondeu com body vazio. Verifique se o workflow esta ativo e se o Respond to Webhook retorna JSON (ex.: { reply } ou { embedding })."
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`N8N retornou JSON invalido: ${text.slice(0, 200)}`);
+  }
 }
 
 /** Dispara (fire-and-forget) um workflow assincrono do N8N. */

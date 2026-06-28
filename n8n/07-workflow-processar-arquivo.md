@@ -43,7 +43,7 @@ Validar `x-webhook-secret: {N8N_WEBHOOK_SECRET}` no primeiro node.
 ### 2. HTTP — Atualizar status: processing
 ```
 PUT {API_URL}/api/knowledge/files/{{ fileId }}
-Header: x-webhook-secret: {WEBHOOK_SECRET}
+Header: x-webhook-secret: {N8N_WEBHOOK_SECRET}
 Body: { "status": "processing", "progress": 0 }
 ```
 

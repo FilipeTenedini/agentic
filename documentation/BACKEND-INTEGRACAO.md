@@ -73,9 +73,9 @@ O backend **não chama LLM diretamente** em produção — delega ao N8N via web
 | Direção | Quem inicia | Protocolo | Autenticação |
 | --- | --- | --- | --- |
 | Backend → N8N | Backend | `POST {N8N_URL}/webhook/{path}` | Header `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
-| N8N → Backend | N8N | `PUT/POST {API_URL}/api/...` | Header `x-webhook-secret: {WEBHOOK_SECRET}` |
+| N8N → Backend | N8N | `PUT/POST {API_URL}/api/...` | Header `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 | Evolution → N8N | Evolution API | Webhook configurado no N8N | Conforme Evolution |
-| Evolution → Backend | Evolution API (opcional) | `POST {API_URL}/api/webhooks/evolution` | Header `x-webhook-secret: {WEBHOOK_SECRET}` |
+| Evolution → Backend | Evolution API (opcional) | `POST {API_URL}/api/webhooks/evolution` | Header `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 
 ---
 
@@ -86,12 +86,13 @@ O backend **não chama LLM diretamente** em produção — delega ao N8N via web
 Todas as rotas de callback do backend exigem:
 
 ```
-x-webhook-secret: {WEBHOOK_SECRET}
+x-webhook-secret: {N8N_WEBHOOK_SECRET}
 ```
 
 Rotas protegidas:
 - `PUT /api/knowledge/files/:fileId`
 - `POST /api/knowledge/files/:fileId/chunks`
+- `POST /api/internal/embed`
 - `POST /api/conversations/internal`
 - `PUT /api/webhooks/whatsapp-status`
 - `POST /api/webhooks/evolution`
@@ -219,25 +220,27 @@ Upload (frontend)
   → Backend salva arquivo no storage
   → Backend dispara N8N webhook "knowledge-file-processing"
   → N8N baixa arquivo do storageUrl
-  → N8N extrai texto (PDF/DOCX/XLSX/CSV/TXT/imagem OCR)
-  → N8N divide em chunks (500-1000 tokens, overlap 10%)
-  → N8N gera embeddings (OpenAI text-embedding-3-small, 1536 dims)
+  → N8N extrai texto (CSV/XLSX)
+  → N8N divide em chunks
+  → N8N gera embeddings via POST /api/internal/embed (Ollama nomic-embed-text, 768 dims)
   → N8N → POST /api/knowledge/files/:id/chunks { chunks: [...] }
   → N8N → PUT /api/knowledge/files/:id { status: "ready", chunks, vectors, indexedAt }
   → Frontend reflete status via polling
 ```
 
-**Busca semântica em produção:**
+**Busca semântica em produção** (requer WF `embed-message` para embed da query):
 
 ```sql
--- Exemplo de query vetorial (pgvector, cosine distance)
+-- pgvector, cosine distance (768 dims)
 SELECT content, file_id, chunk_index,
        1 - (embedding <=> $1::vector) AS score
 FROM knowledge_chunks
-WHERE agent_id = $2
+WHERE agent_id = $2 AND embedding IS NOT NULL
 ORDER BY embedding <=> $1::vector
 LIMIT $3;
 ```
+
+Documentação do workflow: [`documentation/n8n/concluded/file-processor.md`](n8n/concluded/file-processor.md)
 
 ### 4.6 Upload de arquivos
 
@@ -285,8 +288,8 @@ Passo 4 — Chunking
   PUT /api/knowledge/files/:fileId { "progress": 45 }
 
 Passo 5 — Gerar embeddings
-  Para cada chunk: chamar API de embedding (OpenAI, etc.)
-  Atualizar progresso: { "progress": 80 }
+  Para cada chunk: POST {API_URL}/api/internal/embed (proxy → Ollama nomic-embed-text, 768d)
+  Ver: documentation/n8n/ollama-proxy-embeddings.md
 
 Passo 6 — Salvar chunks
   POST /api/knowledge/files/:fileId/chunks
@@ -442,7 +445,7 @@ systemPrompt =
 
 ```
 POST /api/conversations/internal
-x-webhook-secret: {WEBHOOK_SECRET}
+x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 {
   "agentId": "uuid",
@@ -464,10 +467,10 @@ x-webhook-secret: {WEBHOOK_SECRET}
 | Item | Valor |
 | --- | --- |
 | **Trigger** | Webhook `knowledge-file-processing` (backend) |
-| **Entrada** | `{ fileId, agentId, storageUrl, fileType }` |
-| **Saída** | Chunks salvos + status `ready` no backend |
+| **Entrada** | `{ fileId, agentId, storageUrl, downloadUrl, fileType, embeddingModel, embeddingDimensions }` |
+| **Saída** | Chunks + embeddings salvos + status `ready` (`vectors > 0`) |
 
-Ver fluxo detalhado na [seção 4.7](#47-processamento-de-arquivos).
+Ver fluxo detalhado em [`documentation/n8n/concluded/file-processor.md`](n8n/concluded/file-processor.md).
 
 ---
 
@@ -492,7 +495,7 @@ Ver fluxo detalhado na [seção 4.7](#47-processamento-de-arquivos).
 
 ```
 PUT /api/webhooks/whatsapp-status
-x-webhook-secret: {WEBHOOK_SECRET}
+x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 {
   "instanceName": "flowassist-a1b2c3d4",
@@ -515,7 +518,7 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 | --- | --- |
 | **Método** | `PUT` |
 | **URL** | `/api/knowledge/files/:fileId` |
-| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Auth** | `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 | **Quando chamar** | Durante e após processamento de arquivo (Workflow 07) |
 
 **Payload:**
@@ -555,7 +558,7 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 | --- | --- |
 | **Método** | `POST` |
 | **URL** | `/api/knowledge/files/:fileId/chunks` |
-| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Auth** | `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 | **Quando chamar** | Após gerar embeddings (Workflow 07, passo 6) |
 
 **Payload:**
@@ -566,7 +569,7 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
     {
       "content": "Trecho do documento...",
       "chunkIndex": 0,
-      "embedding": [0.012, -0.034, 0.056, "... 1536 valores"]
+      "embedding": [0.012, -0.034, 0.056, "... 768 valores"]
     },
     {
       "content": "Outro trecho...",
@@ -580,18 +583,58 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 **Resposta:**
 
 ```json
-{ "saved": 2 }
+{ "saved": 2, "vectors": 2 }
 ```
 
 ---
 
-### 6.3 Salvar histórico de conversa (WhatsApp)
+### 6.3 Proxy de embeddings (Ollama local)
+
+| Campo | Valor |
+| --- | --- |
+| **Método** | `POST` |
+| **URL** | `/api/internal/embed` |
+| **Auth** | `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
+| **Quando chamar** | WF #07 (embed por chunk) e WF `embed-message` (embed da pergunta) |
+
+O N8N Cloud **não alcança** `localhost:11434`. O backend repassa a requisição ao Ollama
+local (Docker) e devolve a resposta. Use a **mesma `API_URL`** (ngrok porta 3000) dos
+outros callbacks — não é necessário túnel separado para Ollama.
+
+**Payload:**
+
+```json
+{
+  "model": "nomic-embed-text",
+  "input": "texto para embeddar"
+}
+```
+
+Também aceita `text` ou `prompt` no lugar de `input`.
+
+**Resposta (formato Ollama `/api/embed`):**
+
+```json
+{
+  "model": "nomic-embed-text",
+  "embeddings": [[0.012, -0.034, "... 768 valores"]]
+}
+```
+
+No N8N, o vetor fica em `$json.embeddings[0]`.
+
+**Pré-requisito no servidor:** Ollama rodando (`docker compose up -d ollama` +
+`nomic-embed-text` instalado). Variável backend `OLLAMA_URL=http://localhost:11434`.
+
+---
+
+### 6.4 Salvar histórico de conversa (WhatsApp)
 
 | Campo | Valor |
 | --- | --- |
 | **Método** | `POST` |
 | **URL** | `/api/conversations/internal` |
-| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Auth** | `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 | **Quando chamar** | Após gerar e enviar resposta WhatsApp (Workflow 06) |
 
 **Payload:**
@@ -625,13 +668,13 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 
 ---
 
-### 6.4 Atualizar status de conexão WhatsApp
+### 6.5 Atualizar status de conexão WhatsApp
 
 | Campo | Valor |
 | --- | --- |
 | **Método** | `PUT` |
 | **URL** | `/api/webhooks/whatsapp-status` |
-| **Auth** | `x-webhook-secret: {WEBHOOK_SECRET}` |
+| **Auth** | `x-webhook-secret: {N8N_WEBHOOK_SECRET}` |
 | **Quando chamar** | Ao receber eventos da Evolution (Workflow 08) |
 
 **Payload:**
@@ -660,7 +703,7 @@ Base URL: `{API_URL}` (ex.: `http://localhost:3000`).
 
 ---
 
-### 6.5 Busca na base de conhecimento (referência)
+### 6.6 Busca na base de conhecimento (referência)
 
 | Campo | Valor |
 | --- | --- |
@@ -761,12 +804,17 @@ x-webhook-secret: {N8N_WEBHOOK_SECRET}
 {
   "fileId": "uuid-do-arquivo",
   "agentId": "uuid-do-agente",
-  "storageUrl": "/uploads/uuid-catalogo.pdf",
-  "fileType": "pdf"
+  "storageUrl": "s3://userId/arquivo.xlsx",
+  "downloadUrl": "https://bucket.s3.amazonaws.com/...?X-Amz-Signature=...",
+  "fileType": "csv | xlsx",
+  "embeddingModel": "nomic-embed-text",
+  "embeddingDimensions": 768
 }
 ```
 
-**Resposta:** fire-and-forget (backend não aguarda). O N8N atualiza o backend via callbacks (seção 6).
+**Resposta:** fire-and-forget. O N8N atualiza o backend via callbacks (seção 6) e
+`POST /api/internal/embed` para vetores. Ver
+[`documentation/n8n/concluded/file-processor.md`](n8n/concluded/file-processor.md).
 
 ---
 
@@ -813,9 +861,10 @@ Valores aceitos: `"personalUse"` | `"whatsapp"` (camelCase, alinhado ao frontend
 
 ### 8.5 Embedding
 
-- Dimensão: **1536** (OpenAI `text-embedding-3-small`)
-- Armazenamento: coluna `embedding vector(1536)` no PostgreSQL (pgvector)
-- Formato no callback: array de números `[0.012, -0.034, ...]`
+- Modelo: **nomic-embed-text** (Ollama local via proxy)
+- Dimensão: **768** (pgvector `vector(768)`)
+- N8N chama: `POST {API_URL}/api/internal/embed` com `x-webhook-secret`
+- Formato na resposta: `embeddings[0]` — array de 768 números
 
 ### 8.6 Mapeamento instância → agente
 
@@ -884,14 +933,15 @@ Para sair do mock mode, altere as flags no `.env` e garanta que os workflows N8N
 | `src/modules/chats/chat.routes.ts` | `POST /internal` | — | callback N8N | Workflow 06 chama este endpoint |
 | `src/modules/webhooks/webhook.routes.ts` | `PUT /whatsapp-status` | — | callback N8N | Workflow 08 chama este endpoint |
 | `src/modules/knowledge/knowledge.routes.ts` | `PUT /files/:id`, `POST /chunks` | — | callback N8N | Workflow 07 chama estes endpoints |
+| `src/modules/internal/internal.routes.ts` | `POST /embed` | — | proxy N8N | WF 07 e embed-message chamam Ollama via backend |
 
 ### Checklist para go-live
 
 - [ ] Workflows 01–08 implementados no N8N
 - [ ] `MOCK_AI=false`, `MOCK_RAG=false`, `MOCK_WHATSAPP=false`
-- [ ] `N8N_URL`, `N8N_WEBHOOK_SECRET`, `WEBHOOK_SECRET` configurados
+- [ ] `N8N_URL`, `N8N_WEBHOOK_SECRET` configurados
 - [ ] Evolution API rodando e webhooks apontando para N8N
-- [ ] Modelo de embedding configurado (1536 dims)
+- [ ] Modelo de embedding: Ollama `nomic-embed-text` (768 dims) + Ollama local
 - [ ] pgvector habilitado no PostgreSQL
 - [ ] Testar chat interno end-to-end
 - [ ] Testar upload → processamento → busca RAG
@@ -906,8 +956,7 @@ Para sair do mock mode, altere as flags no `.env` e garanta que os workflows N8N
 | Variável | Descrição |
 | --- | --- |
 | `N8N_URL` | URL base do N8N (ex.: `http://n8n:5678`) |
-| `N8N_WEBHOOK_SECRET` | Secret que o backend envia ao chamar N8N |
-| `WEBHOOK_SECRET` | Secret que o N8N envia ao chamar o backend |
+| `N8N_WEBHOOK_SECRET` | Secret bidirecional (backend↔N8N, header `x-webhook-secret`) |
 | `MOCK_AI` | `true` = sem N8N para chat |
 | `MOCK_RAG` | `true` = sem N8N para processamento |
 | `MOCK_WHATSAPP` | `true` = sem Evolution API |
@@ -987,6 +1036,7 @@ Para workflows N8N sem JWT de usuário:
 | --- | --- | --- |
 | `/api/knowledge/files/:fileId` | PUT | 07 |
 | `/api/knowledge/files/:fileId/chunks` | POST | 07 |
+| `/api/internal/embed` | POST | 07, embed-message |
 | `/api/conversations/internal` | POST | 06 |
 | `/api/webhooks/whatsapp-status` | PUT | 08 |
 | `/api/webhooks/evolution` | POST | 08 (alternativa direta) |

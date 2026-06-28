@@ -29,14 +29,13 @@ const envSchema = z.object({
   MOCK_WHATSAPP: booleanFromString.default("true"),
 
   N8N_URL: z.string().default("http://localhost:5678"),
-  N8N_WEBHOOK_SECRET: z.string().default(""),
+  /** Unico secret bidirecional: backend↔N8N (header x-webhook-secret). */
+  N8N_WEBHOOK_SECRET: z.string().default("dev-webhook-secret"),
 
   OPENAI_API_KEY: z.string().default(""),
 
   EVOLUTION_API_URL: z.string().default("http://localhost:8080"),
   EVOLUTION_API_KEY: z.string().default(""),
-
-  WEBHOOK_SECRET: z.string().default("dev-webhook-secret"),
 
   AWS_REGION: z.string().min(1, "AWS_REGION e obrigatorio"),
   AWS_ACCESS_KEY_ID: z.string().min(1, "AWS_ACCESS_KEY_ID e obrigatorio"),
@@ -47,6 +46,15 @@ const envSchema = z.object({
   S3_SIGNED_URL_EXPIRES_SECONDS: z.coerce.number().default(3600),
 
   MAX_UPLOAD_BYTES: z.coerce.number().default(20 * 1024 * 1024),
+
+  /** Modelo/dimensao esperados (validacao + payload para WF 07 e embed-message). */
+  EMBEDDING_MODEL: z.string().default("nomic-embed-text"),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),
+  /** Score minimo (cosine) para considerar um hit na busca vetorial. */
+  VECTOR_SEARCH_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
+
+  /** Ollama local (Docker). O N8N Cloud chama via proxy POST /api/internal/embed. */
+  OLLAMA_URL: z.string().default("http://localhost:11434"),
 });
 
 const parsed = envSchema.safeParse(process.env);

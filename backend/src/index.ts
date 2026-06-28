@@ -15,6 +15,12 @@ async function bootstrap() {
     console.log(`${resumed} arquivo(s) retomando processamento mock.`);
   }
 
+  if (env.N8N_URL.includes("webhook-test")) {
+    console.warn(
+      "AVISO: N8N_URL usa /webhook-test. Em producao use /webhook com workflows Active."
+    );
+  }
+
   const app = createServer();
   const server = app.listen(env.PORT, () => {
     console.log(`Servidor HTTP em http://localhost:${env.PORT}`);

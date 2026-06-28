@@ -27,7 +27,7 @@ Frontend → Backend (JWT) → N8N (webhooks) → LLM / Evolution / PostgreSQL
 - Validar no primeiro node após o Webhook; rejeitar se inválido.
 
 **N8N chama Backend:**
-- Header: `x-webhook-secret: {WEBHOOK_SECRET}`
+- Header: `x-webhook-secret: {N8N_WEBHOOK_SECRET}` (unico secret bidirecional)
 - Base URL: `{API_URL}` (ex.: `http://localhost:3000`)
 
 ## Variáveis a configurar no N8N
@@ -35,8 +35,7 @@ Frontend → Backend (JWT) → N8N (webhooks) → LLM / Evolution / PostgreSQL
 | Variável | Exemplo | Uso |
 |---|---|---|
 | `API_URL` | `http://localhost:3000` | Callbacks ao backend |
-| `WEBHOOK_SECRET` | igual ao backend `.env` | Header nas chamadas N8N→API |
-| `N8N_WEBHOOK_SECRET` | igual ao backend `.env` | Validar entrada do backend |
+| `N8N_WEBHOOK_SECRET` | igual ao backend `.env` | Header em todas as chamadas backend↔n8n |
 | `OPENAI_API_KEY` | sk-... | Chat + embeddings |
 | `EVOLUTION_API_URL` | `http://localhost:8080` | WhatsApp |
 | `EVOLUTION_API_KEY` | ... | WhatsApp |

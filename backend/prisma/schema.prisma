@@ -152,9 +152,9 @@ model KnowledgeChunk {
   agentId    String                       @map("agent_id")
   content    String
   chunkIndex Int                          @map("chunk_index")
-  // Vetor de embedding (1536 dims, ex.: OpenAI text-embedding-3-small).
-  // Consultado via SQL bruto no RAG real; nulo no mock mode.
-  embedding  Unsupported("vector(1536)")?
+  // Vetor de embedding (768 dims com Ollama nomic-embed-text; ver EMBEDDING_DIMENSIONS).
+  // Gerado no N8N (WF 07); consultado via SQL bruto no RAG.
+  embedding  Unsupported("vector(768)")?
   createdAt  DateTime                     @default(now()) @map("created_at")
 
   file  KnowledgeFile @relation(fields: [fileId], references: [id], onDelete: Cascade)

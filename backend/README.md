@@ -13,7 +13,8 @@ que precisa existir no N8N.
 ## Pre-requisitos
 
 - Node.js 18+
-- Docker (para o PostgreSQL com pgvector) ou um PostgreSQL proprio
+- Docker (PostgreSQL com pgvector + Ollama para embeddings)
+- [ngrok](https://ngrok.com/download) (para expor Ollama ao N8N Cloud)
 
 ## Como rodar
 
@@ -41,6 +42,46 @@ npm run dev
 A API sobe em `http://localhost:3000`. Healthcheck em `GET /health`.
 
 **Credenciais demo** (criadas pelo seed): `demo@flowassist.com` / `demo1234`.
+
+## Ollama (embeddings para o N8N Cloud)
+
+O N8N Cloud nao alcanca `localhost`. O Ollama roda no Docker local; o **backend faz proxy**
+em `POST /api/internal/embed` (mesma URL do ngrok do backend).
+
+```bash
+# 1. Ollama + modelo nomic-embed-text
+npm run ollama:setup
+
+# 2. Backend rodando (npm run dev)
+
+# 3. Um unico tunel ngrok na porta 3000 (nao precisa expor 11434)
+ngrok http 3000
+```
+
+Configure no **N8N → Settings → Variables**:
+
+| Variavel | Valor |
+| --- | --- |
+| `API_URL` | URL do ngrok (ex.: `https://abc123.ngrok-free.dev`) |
+| `N8N_WEBHOOK_SECRET` | = `N8N_WEBHOOK_SECRET` do backend (unico secret bidirecional) |
+| `EMBEDDING_MODEL` | `nomic-embed-text` |
+
+No node HTTP de embedding do N8N:
+
+- **URL:** `={{ ($vars.API_URL).replace(/\/$/, '') + '/api/internal/embed' }}`
+- **Header:** `x-webhook-secret: {{ $vars.N8N_WEBHOOK_SECRET }}`
+- **Body:** `{ "model": "nomic-embed-text", "input": "{{ texto }}" }`
+- Resposta: `$json.embeddings[0]` (768 floats)
+
+Teste via ngrok:
+
+```bash
+curl https://SUA-URL.ngrok-free.dev/api/internal/embed \
+  -H "Content-Type: application/json" \
+  -H "x-webhook-secret: SEU_N8N_WEBHOOK_SECRET" \
+  -H "ngrok-skip-browser-warning: true" \
+  -d '{"model":"nomic-embed-text","input":"teste ghg"}'
+```
 
 ## Scripts
 

@@ -1,6 +1,9 @@
 # PostgreSQL com a extensao pgvector ja embutida.
 # A imagem pgvector/pgvector inclui o binario da extensao; o backend roda
 # `CREATE EXTENSION IF NOT EXISTS vector;` na inicializacao (ver infra/prisma.ts).
+#
+# Ollama: embeddings locais (nomic-embed-text, 768 dims) consumidos pelo N8N Cloud
+# via tunel ngrok — ver scripts/ollama-setup.sh e scripts/ollama-tunnel.sh
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -15,5 +18,21 @@ services:
     volumes:
       - flowassist_pgdata:/var/lib/postgresql/data
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: flowassist-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - flowassist_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
 volumes:
   flowassist_pgdata:
+  flowassist_ollama:

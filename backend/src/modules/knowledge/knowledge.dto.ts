@@ -22,7 +22,7 @@ export const chunksSchema = z.object({
       z.object({
         content: z.string(),
         chunkIndex: z.number().int(),
-        embedding: z.array(z.number()).optional(),
+        embedding: z.array(z.number()).min(1).optional(),
       })
     )
     .min(1),

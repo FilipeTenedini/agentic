@@ -30,7 +30,7 @@ Eventos necessários:
 
 ```
 PUT {API_URL}/api/webhooks/whatsapp-status
-Header: x-webhook-secret: {WEBHOOK_SECRET}
+Header: x-webhook-secret: {N8N_WEBHOOK_SECRET}
 
 Body:
 {
@@ -95,7 +95,7 @@ Filtrar eventos sem `instanceName` ou que não comecem com `flowassist-`.
 PUT {API_URL}/api/webhooks/whatsapp-status
 Headers:
   Content-Type: application/json
-  x-webhook-secret: {WEBHOOK_SECRET}
+  x-webhook-secret: {N8N_WEBHOOK_SECRET}
 Body: campos normalizados do passo 2
 ```
 

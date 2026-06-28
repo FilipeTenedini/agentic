@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\nconst expected = $env.N8N_WEBHOOK_SECRET || 'dev-n8n-secret';\nif (secret !== expected) throw new Error('Unauthorized');\n\nconst body = item.body ?? item;\nif (!body.fileId || !body.agentId || !body.storageUrl || !body.downloadUrl) {\n  throw new Error('Payload invalido');\n}\nreturn [{ json: body }];",
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst secret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\nconst expected = $env.N8N_WEBHOOK_SECRET || 'dev-webhook-secret';\nif (secret !== expected) throw new Error('Unauthorized');\n\nconst body = item.body ?? item;\nif (!body.fileId || !body.agentId || !body.storageUrl || !body.downloadUrl) {\n  throw new Error('Payload invalido');\n}\nreturn [{ json: body }];",
         "mode": "runOnceForAllItems"
       },
       "id": "71cae54a-4471-4177-9875-56fd05996b43",
@@ -45,7 +45,7 @@
             },
             {
               "name": "x-webhook-secret",
-              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || 'dev-webhook-secret' }}"
             }
           ]
         },
@@ -89,7 +89,7 @@
             },
             {
               "name": "x-webhook-secret",
-              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || 'dev-webhook-secret' }}"
             }
           ]
         },
@@ -133,7 +133,7 @@
             },
             {
               "name": "x-webhook-secret",
-              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || 'dev-webhook-secret' }}"
             }
           ]
         },
@@ -163,7 +163,7 @@
             },
             {
               "name": "x-webhook-secret",
-              "value": "={{ $env.WEBHOOK_SECRET || 'dev-webhook-secret' }}"
+              "value": "={{ $env.N8N_WEBHOOK_SECRET || 'dev-webhook-secret' }}"
             }
           ]
         },

@@ -36,12 +36,11 @@ export async function generateReply(
 ): Promise<string> {
   if (env.MOCK_AI) {
     const reply = MOCK_REPLIES[Math.floor(Math.random() * MOCK_REPLIES.length)];
-    // Simula latencia de geracao (typing indicator no frontend).
     await new Promise((resolve) => setTimeout(resolve, 600));
     return reply;
   }
 
-  const result = await callN8nWebhook<{ reply: string }>({
+  const result = await callN8nWebhook<{ reply?: string }>({
     path: "personal-use-chat",
     payload: {
       systemPrompt: params.systemPrompt,
@@ -51,6 +50,10 @@ export async function generateReply(
       knowledgeContext: params.knowledgeContext ?? "",
     },
   });
+
+  if (!result.reply?.trim()) {
+    throw new Error("N8N respondeu sem o campo reply");
+  }
 
   return result.reply;
 }
