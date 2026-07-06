@@ -5,6 +5,7 @@ import { logActivity } from "../activities/activity.service.js";
 import { loadAgent, getAgentId } from "../agents/agent.service.js";
 import { searchByAgent } from "../knowledge/knowledge.service.js";
 import { buildSystemPrompt, resolvePersonality } from "./chat.prompt.js";
+import { buildRagSearchQuery } from "./chat.rag-query.js";
 import { logger } from "../../shared/utils/logger.js";
 import {
   toConversationDTO,
@@ -128,21 +129,6 @@ export async function sendMessage(
   const personalChannel = agent.channels.find((c) => c.channelId === "personalUse");
   const personality = resolvePersonality(agent, "personalUse");
 
-  const knowledgeBaseEnabled = personalChannel?.useSharedKnowledgeBase ?? true;
-  let knowledgeContext = "";
-  if (knowledgeBaseEnabled) {
-    log.info("Buscando contexto RAG", { agentId: agent.id, topK: 5 });
-    const hits = await searchByAgent(agent.id, trimmed, 5);
-    knowledgeContext = hits.map((h) => h.content).join("\n---\n");
-    log.info("RAG concluido", {
-      hits: hits.length,
-      contextChars: knowledgeContext.length,
-      scores: hits.map((h) => Number(h.score.toFixed(3))),
-    });
-  } else {
-    log.debug("Base de conhecimento desabilitada para este canal");
-  }
-
   const history = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: "asc" },
@@ -153,12 +139,29 @@ export async function sendMessage(
     content: m.content,
   }));
 
+  const knowledgeBaseEnabled = personalChannel?.useSharedKnowledgeBase ?? true;
+  let knowledgeContext = "";
+  if (knowledgeBaseEnabled) {
+    const ragQuery = buildRagSearchQuery(trimmed, llmHistory);
+    log.info("Buscando contexto RAG", { agentId: agent.id, topK: 5 });
+    const hits = await searchByAgent(agent.id, ragQuery, 5);
+    knowledgeContext = hits.map((h) => h.content).join("\n---\n");
+    log.info("RAG concluido", {
+      hits: hits.length,
+      contextChars: knowledgeContext.length,
+      scores: hits.map((h) => Number(h.score.toFixed(3))),
+    });
+  } else {
+    log.debug("Base de conhecimento desabilitada para este canal");
+  }
+
   const systemPrompt = buildSystemPrompt({
     agent,
     channelId: "personalUse",
     personality,
     knowledgeContext,
     knowledgeBaseEnabled,
+    isFirstMessage: isFirst,
   });
 
   const replyText = await generateReply({

@@ -10,19 +10,20 @@ const prisma = new PrismaClient();
 const DEMO_EMAIL = "demo@flowassist.com";
 const MOCK_PHONE_NUMBER = "+55 11 98765-4321";
 
-const DEMO_BASE_INSTRUCTIONS = `Você é o assistente da empresa. Responda sempre em português do Brasil, de forma cordial e objetiva.
+const DEMO_BASE_INSTRUCTIONS = `Voce e o assistente da empresa. Responda sempre em portugues do Brasil, de forma cordial e natural.
 
 Como responder:
-- Cumprimente o cliente e seja prestativo.
-- Use as informações da base de conhecimento quando disponíveis.
-- Quando não souber, ofereça encaminhar para um atendente humano.
+- Mantenha continuidade: cada mensagem continua a conversa anterior.
+- Use a base de conhecimento quando houver trechos relevantes; complemente com explicacao clara quando fizer sentido.
+- Seja util e direto; evite tom de script de call center.
 
-Como NÃO responder:
-- Não invente preços, prazos ou políticas.
-- Não compartilhe dados internos ou confidenciais.
+Como NAO responder:
+- Nao repita cumprimentos a cada mensagem.
+- Nao invente precos, prazos, numeros ou politicas internas.
+- Nao compartilhe dados confidenciais.
 
 Contexto da empresa:
-- Atendimento de segunda a sexta, das 9h às 18h.`;
+- Atendimento de segunda a sexta, das 9h as 18h.`;
 
 async function main() {
   console.log("Seed: limpando dados demo anteriores...");
@@ -93,7 +94,7 @@ async function main() {
             useSharedPersonality: false,
             useSharedKnowledgeBase: true,
             instructions:
-              "Pode usar linguagem mais técnica e detalhada.\n\nUse listas e marcadores para organizar respostas complexas.\n\nCite fontes da base de conhecimento quando disponíveis.",
+              "Conversa tecnica e continua: aprofunde o assunto em follow-ups sem reiniciar do zero.\n\nUse listas so quando organizarem melhor a resposta; prefira prosa natural.\n\nPriorize dados da base quando existirem; explique conceitos gerais quando ajudar.",
             personality: {
               temperature: 55,
               creativity: 60,

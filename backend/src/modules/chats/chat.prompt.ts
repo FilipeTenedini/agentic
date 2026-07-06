@@ -25,9 +25,17 @@ export function buildSystemPrompt(params: {
   knowledgeContext?: string;
   /** Quando true, o canal usa a base compartilhada (RAG tentado nesta mensagem). */
   knowledgeBaseEnabled?: boolean;
+  /** Primeira mensagem da conversa (permite cumprimento inicial). */
+  isFirstMessage?: boolean;
 }): string {
-  const { agent, channelId, personality, knowledgeContext, knowledgeBaseEnabled } =
-    params;
+  const {
+    agent,
+    channelId,
+    personality,
+    knowledgeContext,
+    knowledgeBaseEnabled,
+    isFirstMessage = false,
+  } = params;
   const channel = agent.channels.find((c) => c.channelId === channelId);
 
   const parts: string[] = [];
@@ -39,19 +47,61 @@ export function buildSystemPrompt(params: {
     parts.push(`Instrucoes especificas deste canal:\n${channel.instructions.trim()}`);
   }
 
+  parts.push(conversationGuidelines(isFirstMessage));
   parts.push(personalityToGuidelines(personality));
+  parts.push(knowledgeGuidelines(knowledgeContext, knowledgeBaseEnabled));
 
-  if (knowledgeContext && knowledgeContext.trim()) {
-    parts.push(
-      `Use APENAS as informacoes da base de conhecimento abaixo para responder sobre fatos, dados e politicas. Se a resposta nao estiver nos trechos, diga que nao encontrou nos arquivos indexados.\n\n${knowledgeContext.trim()}`
-    );
-  } else if (knowledgeBaseEnabled) {
-    parts.push(
-      "Nenhum trecho relevante foi recuperado da base de conhecimento para esta pergunta. Nao invente dados, numeros, politicas ou conteudo tecnico. Informe que nao encontrou essa informacao nos arquivos disponiveis e ofereca ajuda de outra forma."
+  return parts.join("\n\n");
+}
+
+function conversationGuidelines(isFirstMessage: boolean): string {
+  const lines = [
+    "Continuidade da conversa:",
+    "- Mantenha o fio do assunto usando o historico enviado.",
+    "- Follow-ups ('mais informacoes', 'explique melhor', 'e isso?') referem-se ao topico ja em discussao — nao peca ao usuario para repetir o contexto.",
+    "- Responda como um assistente em chat continuo, nao como um bot que reinicia a cada mensagem.",
+  ];
+
+  if (isFirstMessage) {
+    lines.push("- Esta e a primeira mensagem da conversa: cumprimente brevemente se fizer sentido.");
+  } else {
+    lines.push(
+      "- NAO repita cumprimentos (Olá, Oi, Hey) — va direto ao ponto.",
+      "- NAO reintroduza o assunto como se fosse a primeira interacao."
     );
   }
 
-  return parts.join("\n\n");
+  return lines.join("\n");
+}
+
+function knowledgeGuidelines(
+  knowledgeContext?: string,
+  knowledgeBaseEnabled?: boolean
+): string {
+  if (knowledgeContext?.trim()) {
+    return [
+      "Base de conhecimento (trechos recuperados — use quando forem relevantes):",
+      knowledgeContext.trim(),
+      "",
+      "Como usar a base:",
+      "- Priorize os trechos para fatos, numeros, nomes e dados especificos da empresa ou dos arquivos.",
+      "- Complemente com explicacao natural e conhecimento geral quando ajudar o usuario a entender.",
+      "- Nao invente numeros, politicas ou dados que deveriam vir dos arquivos.",
+      "- Se faltar um dado especifico nos trechos, diga com honestidade em vez de inventar.",
+      "- Integre as informacoes na resposta; evite citar 'linha X do arquivo' salvo se o usuario pedir referencia explicita.",
+    ].join("\n");
+  }
+
+  if (knowledgeBaseEnabled) {
+    return [
+      "Base de conhecimento:",
+      "Nenhum trecho relevante foi encontrado nos arquivos indexados para esta pergunta.",
+      "Responda normalmente com seu conhecimento geral e o contexto da conversa.",
+      "Nao invente numeros, politicas internas ou dados que deveriam vir dos arquivos da empresa.",
+    ].join("\n");
+  }
+
+  return "";
 }
 
 function personalityToGuidelines(p: AgentPersonality): string {
