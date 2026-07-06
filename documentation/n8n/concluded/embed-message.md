@@ -333,8 +333,8 @@ sequenceDiagram
 
 ## Referências cruzadas
 
+- Resposta LLM (chat): [`documentation/n8n/concluded/personal-use-chat.md`](personal-use-chat.md)
 - File processor (indexação): [`documentation/n8n/concluded/file-processor.md`](file-processor.md)
 - Proxy Ollama + ngrok: [`documentation/n8n/ollama-proxy-embeddings.md`](../ollama-proxy-embeddings.md)
 - Integração geral: [`documentation/BACKEND-INTEGRACAO.md`](../../BACKEND-INTEGRACAO.md) (seções 4, 6.3, 7.1)
-- Spec de implementação: [`to-implement/01-embed-message.md`](../../../to-implement/01-embed-message.md)
 - Backend: `embedding.client.ts`, `knowledge.service.ts`, `chat.service.ts`

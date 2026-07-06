@@ -820,6 +820,9 @@ O n8n chama `POST {API_URL}/api/internal/embed` (proxy Ollama). Documentação c
 }
 ```
 
+Documentação completa do workflow:
+[`documentation/n8n/concluded/personal-use-chat.md`](n8n/concluded/personal-use-chat.md).
+
 ---
 
 ### 7.3 knowledge-file-processing
@@ -958,7 +961,7 @@ Para sair do mock mode, altere as flags no `.env` e garanta que os workflows N8N
 | Arquivo | Função | Flag | Webhook N8N | O que fazer |
 | --- | --- | --- | --- | --- |
 | `src/infra/integrations/embedding.client.ts` | `embedText()` | `MOCK_RAG` | `embed-message` | WF #1; retornar `{ embedding }` (768d) |
-| `src/infra/integrations/llm.client.ts` | `generateReply()` | `MOCK_AI` | `personal-use-chat` | Criar Workflow 05; retornar `{ reply }` |
+| `src/infra/integrations/llm.client.ts` | `generateReply()` | `MOCK_AI` | `personal-use-chat` | WF #3; retornar `{ reply }` — ver [`personal-use-chat.md`](n8n/concluded/personal-use-chat.md) |
 | `src/infra/integrations/n8n.client.ts` | `callN8nWebhook()` | — | (genérico) | Configurar `N8N_URL` e `N8N_WEBHOOK_SECRET` |
 | `src/modules/knowledge/knowledge.service.ts` | `startProcessing()` | `MOCK_RAG` | `knowledge-file-processing` | Criar Workflow 07 |
 | `src/infra/integrations/whatsapp.client.ts` | `createWhatsAppInstance()` | `MOCK_WHATSAPP` | — | Configurar `EVOLUTION_API_URL` e `EVOLUTION_API_KEY` |
@@ -1061,7 +1064,7 @@ Para workflows N8N sem JWT de usuário:
 | Path | Método | Workflow |
 | --- | --- | --- |
 | `/webhook/embed-message` | POST | 01 |
-| `/webhook/personal-use-chat` | POST | 05 |
+| `/webhook/personal-use-chat` | POST | 03 |
 | `/webhook/knowledge-file-processing` | POST | 07 |
 
 ### Backend expõe (N8N chama)

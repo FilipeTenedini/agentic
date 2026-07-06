@@ -519,7 +519,7 @@ sequenceDiagram
 ## Referências cruzadas
 
 - Embed message (query RAG): [`documentation/n8n/concluded/embed-message.md`](embed-message.md)
+- Personal use chat (LLM): [`documentation/n8n/concluded/personal-use-chat.md`](personal-use-chat.md)
 - Proxy Ollama + ngrok: [`documentation/n8n/ollama-proxy-embeddings.md`](../ollama-proxy-embeddings.md)
 - Integração geral: [`documentation/BACKEND-INTEGRACAO.md`](../../BACKEND-INTEGRACAO.md) (seções 4.7, 6.2, 6.3)
-- Spec de implementação: [`to-implement/02-file-processor-embeddings.md`](../../../to-implement/02-file-processor-embeddings.md)
 - Backend: `knowledge.service.ts`, `ollama.client.ts`, `internal.routes.ts`
